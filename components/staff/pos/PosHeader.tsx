@@ -1,11 +1,12 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { BrandLogo } from '@/components/shared/BrandLogo';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 import { OrderStatus } from '@/lib/pos/order';
-import { Plus, ArrowLeftRight, History } from 'lucide-react';
+import { formatClockTime } from '@/lib/utils';
+import { Plus, ArrowLeftRight, History, Clock } from 'lucide-react';
 
 interface PosHeaderProps {
   activeOrderToken: string;
@@ -22,6 +23,19 @@ export function PosHeader({
   onOpenOrderHistory,
   staffName = 'Alex M.',
 }: PosHeaderProps) {
+  // Mount-gate live clock: renders tabular-nums placeholder ("--:-- --") on SSR / first paint
+  const [isMounted, setIsMounted] = useState(false);
+  const [clockTime, setClockTime] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setIsMounted(true);
+    setClockTime(new Date());
+    const timer = setInterval(() => {
+      setClockTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Status visual badge styling (Only Processing and Completed)
   const statusConfig = {
     PROCESSING: {
@@ -41,18 +55,28 @@ export function PosHeader({
   };
 
   return (
-      <header className="h-13 sm:h-14 bg-white border-b border-[#E8E3C3] px-3 sm:px-5 flex items-center justify-between shadow-2xs shrink-0 select-none">
-        {/* 1. Left: Brand & Terminal Identification */}
-        <div className="flex items-center gap-3">
-              <BrandLogo size="md" href="/" />
-              <div className="hidden lg:block h-5 w-px bg-[#E8E3C3]" />
-              <div className="hidden lg:flex items-center gap-2">
-                <StatusBadge label="Staff Counter Terminal" variant="brand" />
-                <span className="text-xs text-[#777777] font-semibold">
-                  Terminal #01 · {staffName}
-                </span>
-              </div>
+    <header className="h-13 sm:h-14 bg-white border-b border-[#E8E3C3] px-3 sm:px-5 flex items-center justify-between shadow-2xs shrink-0 select-none">
+      {/* 1. Left: Brand & Terminal Identification */}
+      <div className="flex items-center gap-3">
+        <BrandLogo size="md" href="/" />
+        <div className="hidden lg:block h-5 w-px bg-[#E8E3C3]" />
+        <div className="hidden lg:flex items-center gap-2">
+          <StatusBadge label="Staff Counter Terminal" variant="brand" />
+          <span className="text-xs text-[#777777] font-semibold">
+            Terminal #01 · {staffName}
+          </span>
+          <span className="text-[#E8E3C3]">·</span>
+          <div className="flex items-center gap-1.5 text-xs text-[#777777]">
+            <Clock className="w-3.5 h-3.5 text-[#C43C1E]" />
+            <span
+              suppressHydrationWarning
+              className="tabular-nums font-semibold text-[#222222]"
+            >
+              {isMounted && clockTime ? formatClockTime(clockTime) : '--:-- --'}
+            </span>
           </div>
+        </div>
+      </div>
 
             {/* 2. Center: Active Order Indicator & Status */}
             <div className="flex items-center gap-2">

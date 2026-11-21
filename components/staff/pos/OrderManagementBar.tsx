@@ -3,25 +3,15 @@
 import React from 'react';
 import { PosOrder } from '@/lib/pos/order';
 import { formatPaise } from '@/lib/pos/calculations';
+import { formatOrderTime } from '@/lib/utils';
+
+export { formatOrderTime };
 
 interface OrderManagementBarProps {
   orders: PosOrder[];
   activeOrderId: string;
   onSelectOrder: (orderId: string) => void;
   onRefreshCompleted?: () => void;
-}
-
-function formatOrderTime(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    let hours = d.getHours();
-    const minutes = d.getMinutes().toString().padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    return `${hours}:${minutes} ${ampm}`;
-  } catch {
-    return '--:--';
-  }
 }
 
 interface OrderCardProps {
