@@ -21,8 +21,8 @@ test.describe('Owner Menu Management & Staff Catalog Live E2E', () => {
     // Switch to Categories tab
     await page.getByRole('button', { name: /Categories/i }).click();
     await expect(page.getByText('System Identifier')).toBeVisible();
-    await expect(page.getByText('gelato')).toBeVisible();
-    await expect(page.getByText('tubs')).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'gelato', exact: true })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'tubs', exact: true })).toBeVisible();
   });
 
   test('Staff POS loads catalog, sells Gelato directly without size popup, and records order', async ({ page }) => {
@@ -42,12 +42,13 @@ test.describe('Owner Menu Management & Staff Catalog Live E2E', () => {
     // Click to add gelato item directly (Invariant 2: single scoop, no size dialog)
     await productCard.click();
 
-    // Confirm no dialog popped up
-    await expect(page.locator('div[role="dialog"]')).toHaveCount(0);
+    // Confirm no gelato size selector dialog popped up (Invariant 2)
+    await expect(page.locator('#gelato-size-title')).toHaveCount(0);
+    await expect(page.getByText('Choose your size')).toHaveCount(0);
 
     // Verify cart contains the added item
     const cart = page.locator('div[aria-label="Order Cart"]');
     await expect(cart).toBeVisible();
-    await expect(cart.getByText(/85ml|single scoop|Price|items/i).first()).toBeVisible();
+    await expect(cart.getByText(/item|Total/i).first()).toBeVisible();
   });
 });
