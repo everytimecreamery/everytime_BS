@@ -22,7 +22,6 @@ import { BrandLogo } from '@/components/shared/BrandLogo';
 
 interface OrderReceiptViewProps {
   order: PosOrder;
-  onEdit?: () => void;
   onBack?: () => void;
   onClose?: () => void;
 }
@@ -47,7 +46,7 @@ function formatFullDateTime(isoString?: string | null): { dateStr: string; timeS
   }
 }
 
-export function OrderReceiptView({ order, onEdit, onBack, onClose }: OrderReceiptViewProps) {
+export function OrderReceiptView({ order, onBack, onClose }: OrderReceiptViewProps) {
   const { dateStr, timeStr } = formatFullDateTime(order.completedAt || order.createdAt);
   const paymentDiff = calculatePaymentDifference(order);
   const hasBeenModified =
@@ -64,7 +63,7 @@ export function OrderReceiptView({ order, onEdit, onBack, onClose }: OrderReceip
       aria-label={`Historical Receipt Order ${order.token}`}
       className="flex flex-col h-full bg-white rounded-2xl overflow-hidden select-none"
     >
-      {/* 1. Header Bar with Back, Edit, Print, and Close */}
+      {/* 1. Header Bar with Back, Print, and Close */}
       <div className="px-4 sm:px-5 py-3 border-b border-[#E8E3C3] bg-[#FAF8E8]/80 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           {onBack && (
@@ -84,18 +83,6 @@ export function OrderReceiptView({ order, onEdit, onBack, onClose }: OrderReceip
         </div>
 
         <div className="flex items-center gap-2">
-          {onEdit && (
-            <button
-              type="button"
-              onClick={onEdit}
-              aria-label="Edit Order"
-              className="h-8 px-2.5 rounded-lg bg-[#C43C1E] hover:bg-[#AB3419] text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C43C1E]"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              <span>Edit Order</span>
-            </button>
-          )}
-
           <button
             type="button"
             onClick={() => window.print()}
@@ -359,7 +346,7 @@ export function OrderReceiptView({ order, onEdit, onBack, onClose }: OrderReceip
         <div className="text-center text-[10.5px] text-[#777777] italic pb-2">
           {hasBeenModified
             ? 'Historical transaction audit trail is permanently maintained.'
-            : 'Historical records are permanently locked. Click Edit Order above to record adjustments.'}
+            : 'Historical records are permanently locked and immutable.'}
         </div>
       </div>
     </div>

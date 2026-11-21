@@ -22,8 +22,9 @@ import {
   calculateDiscountPaise,
   calculateTaxPreviewPaise,
   calculateFinalPayablePaise,
+  calculateTaxSplitPaise,
 } from './calculations';
-import { formatOrderToken } from '@/lib/utils';
+import { formatOrderToken, formatTerminalToken, generateUUID } from '@/lib/utils';
 
 export type OrderStatus = 'PROCESSING' | 'COMPLETED';
 
@@ -64,6 +65,8 @@ export interface PosOrder {
   subtotalPaise: number;
   discountPaise: number;
   taxPreviewPaise: number;
+  cgstPaise?: number;
+  sgstPaise?: number;
   totalPaise: number;
   totalPayablePaise: number; // Aliased for cart calculation compatibility
   totalQuantity: number;
@@ -79,6 +82,7 @@ export interface PosOrder {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  businessDate?: string;
 
   // Feature Enhancement: Edit Previous Orders & Audit Trail
   originalPayment?: OriginalPaymentInfo;
@@ -130,15 +134,11 @@ export function getNextToken(): { tokenNumber: number; tokenDisplay: string } {
   };
 }
 
-let orderIdCounter = 1;
-
 /**
- * Generates a unique, non-array-index order ID suitable for in-memory session tracking.
+ * Generates a unique client-generated UUID suitable for idempotent database upserts.
  */
 export function generateUniqueOrderId(): string {
-  const id = `ord_${orderIdCounter}_${Math.random().toString(36).substring(2, 7)}`;
-  orderIdCounter += 1;
-  return id;
+  return generateUUID();
 }
 
 /**
@@ -152,6 +152,8 @@ export function recalculateOrderTotals(
   subtotalPaise: number;
   discountPaise: number;
   taxPreviewPaise: number;
+  cgstPaise: number;
+  sgstPaise: number;
   totalPaise: number;
   totalPayablePaise: number;
   totalQuantity: number;
@@ -160,6 +162,7 @@ export function recalculateOrderTotals(
   const discountPaise = calculateDiscountPaise(subtotalPaise, discount);
   const discountedSubtotalPaise = Math.max(0, subtotalPaise - discountPaise);
   const taxPreviewPaise = calculateTaxPreviewPaise(discountedSubtotalPaise, taxConfig);
+  const { cgstPaise, sgstPaise } = calculateTaxSplitPaise(taxPreviewPaise);
   const totalPayablePaise = calculateFinalPayablePaise(subtotalPaise, discountPaise, taxPreviewPaise);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -167,6 +170,8 @@ export function recalculateOrderTotals(
     subtotalPaise,
     discountPaise,
     taxPreviewPaise,
+    cgstPaise,
+    sgstPaise,
     totalPaise: totalPayablePaise,
     totalPayablePaise,
     totalQuantity,
@@ -178,7 +183,8 @@ export function recalculateOrderTotals(
  */
 export function createNewPosOrder(customToken?: string, timestamp?: string): PosOrder {
   const token = customToken ?? getNextToken().tokenDisplay;
-  const now = timestamp ?? '2026-11-03T12:00:00.000Z';
+  const now = timestamp ?? new Date().toISOString();
+  const businessDate = now.split('T')[0];
 
   return {
     id: generateUniqueOrderId(),
@@ -188,6 +194,8 @@ export function createNewPosOrder(customToken?: string, timestamp?: string): Pos
     subtotalPaise: 0,
     discountPaise: 0,
     taxPreviewPaise: 0,
+    cgstPaise: 0,
+    sgstPaise: 0,
     totalPaise: 0,
     totalPayablePaise: 0,
     totalQuantity: 0,
@@ -198,6 +206,7 @@ export function createNewPosOrder(customToken?: string, timestamp?: string): Pos
     createdAt: now,
     updatedAt: now,
     completedAt: null,
+    businessDate,
   };
 }
 
@@ -401,6 +410,8 @@ export function completeOrderPayment(
   }
 
   const now = new Date().toISOString();
+  const businessDate = order.businessDate || now.split('T')[0];
+  const { cgstPaise, sgstPaise } = calculateTaxSplitPaise(order.taxPreviewPaise);
 
   return {
     ...order,
@@ -411,6 +422,9 @@ export function completeOrderPayment(
     changePaise: method === 'CASH' ? changePaise : undefined,
     completedAt: now,
     updatedAt: now,
+    cgstPaise,
+    sgstPaise,
+    businessDate,
     originalPayment: {
       totalPaise: order.totalPaise,
       method,

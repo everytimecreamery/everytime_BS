@@ -29,6 +29,29 @@ export function formatOrderToken(tokenNumber: number): string {
 }
 
 /**
+ * Formats a terminal and sequence into a standard token display (e.g., "T1-001")
+ */
+export function formatTerminalToken(terminalNumber: string = 'T1', seq: number = 1): string {
+  const num = Math.max(1, Math.floor(seq));
+  const t = terminalNumber.toUpperCase().startsWith('T') ? terminalNumber.toUpperCase() : `T${terminalNumber}`;
+  return `${t}-${num.toString().padStart(3, '0')}`;
+}
+
+/**
+ * Standard client-generated UUID (v4)
+ */
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
  * Formats a date into a clean time string for counter slips and logs (e.g., "02:30 PM")
  */
 export function formatDisplayTime(date: Date | string | number): string {

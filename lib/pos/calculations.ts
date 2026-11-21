@@ -123,6 +123,20 @@ export function calculateFinalPayablePaise(
 }
 
 /**
+ * Splits total tax into CGST and SGST paise.
+ * Guarantees cgstPaise + sgstPaise === taxPaise on both even and odd paise totals.
+ */
+export function calculateTaxSplitPaise(taxPaise: number): {
+  cgstPaise: number;
+  sgstPaise: number;
+} {
+  const safeTax = Math.max(0, Math.round(taxPaise));
+  const cgstPaise = Math.round(safeTax / 2);
+  const sgstPaise = safeTax - cgstPaise;
+  return { cgstPaise, sgstPaise };
+}
+
+/**
  * Calculates change due for cash transactions.
  */
 export function calculateCashChangePaise(

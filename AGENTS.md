@@ -28,3 +28,14 @@ Retain qualifying friction even if it is later fixed or worked around; record th
 Before the final response, run one reporting pass. If candidates remain, from this file's directory run `npx --no-install next internal agent-feedback-instructions` once without piping or truncating its output. Follow its output or error guidance. If a network sandbox blocks it, retry with network access; if it still returns no output, continue normally.
 
 <!-- END:nextjs-agent-feedback -->
+
+## Supabase Offline-First Architecture Live (Phase 1-5 Complete)
+
+The Supabase offline-first integration for Everytime Creamery Billing Software is live:
+- **Shared Postgres Backend**: Project `guvdawwjgxwvdqqedvfy` (Mumbai `ap-south-1`). `/staff` is transaction writer; `/owner` is configuration writer and analytics reader with real-time websocket sync.
+- **Offline-First Outbox**: IndexedDB stores `orders_outbox_v1` and `active_tickets_v1`. Completed orders write locally first; background worker (`initBackgroundSyncWorker`) idempotently syncs with Postgres via `ON CONFLICT (id) DO NOTHING`.
+- **Financial Integrity**: All values in integer paise; tax split strictly guarantees `cgstPaise + sgstPaise === taxPaise` on both odd and even amounts (`calculateTaxSplitPaise`).
+- **Completed Order Immutability**: Finalized transactions are immutable. Modifications produce separate audit records.
+- **PROCESSING Isolation**: Active draft tickets remain local to the terminal and are rehydrated on reload without uploading to the server.
+- **Deterministic Token Sequencing**: Terminal-scoped business day tokens (`T1-001`).
+
