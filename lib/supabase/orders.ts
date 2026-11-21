@@ -187,3 +187,81 @@ export async function fetchOrdersFromDatabase(): Promise<PosOrder[]> {
     return [];
   }
 }
+
+/**
+ * Updates an existing order in Supabase (Owner action).
+ * Supports editing status, discount, notes, and payment tender.
+ */
+export async function updateOrderInDatabase(
+  orderId: string,
+  updates: {
+    status?: 'COMPLETED' | 'VOID' | 'REFUNDED' | 'CANCELLED' | 'MODIFIED';
+    discount_paise?: number;
+    discount_reason?: string | null;
+    subtotal_paise?: number;
+    tax_paise?: number;
+    total_paise?: number;
+    payment_method?: 'cash' | 'upi' | 'card';
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const orderFields: Record<string, any> = {};
+    if (updates.status !== undefined) orderFields.status = updates.status;
+    if (updates.discount_paise !== undefined) orderFields.discount_paise = updates.discount_paise;
+    if (updates.discount_reason !== undefined) orderFields.discount_reason = updates.discount_reason;
+    if (updates.subtotal_paise !== undefined) orderFields.subtotal_paise = updates.subtotal_paise;
+    if (updates.tax_paise !== undefined) {
+      orderFields.tax_paise = updates.tax_paise;
+      orderFields.cgst_paise = Math.round(updates.tax_paise / 2);
+      orderFields.sgst_paise = updates.tax_paise - orderFields.cgst_paise;
+    }
+    if (updates.total_paise !== undefined) orderFields.total_paise = updates.total_paise;
+
+    if (Object.keys(orderFields).length > 0) {
+      const { error: ordErr } = await (supabase as any)
+        .from('orders')
+        .update(orderFields)
+        .eq('id', orderId);
+
+      if (ordErr) {
+        console.error('[updateOrderInDatabase] Error updating order:', ordErr);
+        return { success: false, error: ordErr.message };
+      }
+    }
+
+    if (updates.payment_method) {
+      const { error: payErr } = await (supabase as any)
+        .from('payments')
+        .update({ method: updates.payment_method })
+        .eq('order_id', orderId);
+
+      if (payErr) {
+        console.warn('[updateOrderInDatabase] Payment update warning:', payErr);
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[updateOrderInDatabase] Exception:', err);
+    return { success: false, error: err?.message || 'Failed to update order' };
+  }
+}
+
+/**
+ * Permanently deletes an order and cascaded records from Supabase (Owner action).
+ */
+export async function deleteOrderFromDatabase(
+  orderId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    if (error) {
+      console.error('[deleteOrderFromDatabase] Error deleting order:', error);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    console.error('[deleteOrderFromDatabase] Exception:', err);
+    return { success: false, error: err?.message || 'Failed to delete order' };
+  }
+}

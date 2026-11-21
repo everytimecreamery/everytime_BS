@@ -230,7 +230,7 @@ export interface Database {
           shift_id: string | null;
           token_terminal: string;
           token_seq: number;
-          status: 'COMPLETED';
+          status: 'COMPLETED' | 'VOID' | 'REFUNDED' | 'CANCELLED' | 'MODIFIED';
           subtotal_paise: number;
           discount_paise: number;
           discount_type: string | null;
@@ -252,7 +252,7 @@ export interface Database {
           shift_id?: string | null;
           token_terminal: string;
           token_seq: number;
-          status?: 'COMPLETED';
+          status?: 'COMPLETED' | 'VOID' | 'REFUNDED' | 'CANCELLED' | 'MODIFIED';
           subtotal_paise: number;
           discount_paise?: number;
           discount_type?: string | null;
@@ -274,7 +274,7 @@ export interface Database {
           shift_id?: string | null;
           token_terminal?: string;
           token_seq?: number;
-          status?: 'COMPLETED';
+          status?: 'COMPLETED' | 'VOID' | 'REFUNDED' | 'CANCELLED' | 'MODIFIED';
           subtotal_paise?: number;
           discount_paise?: number;
           discount_type?: string | null;

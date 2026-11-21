@@ -21,7 +21,10 @@ import {
   Store,
   Wifi,
   WifiOff,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
+import { OwnerOrderEditModal, OwnerOrderDeleteDialog } from './OwnerOrderActionModal';
 
 interface OwnerSectionViewProps {
   sectionId: string;
@@ -64,6 +67,8 @@ function DashboardView() {
   const [orders, setOrders] = useState<any[]>([]);
   const [terminals, setTerminals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingOrder, setEditingOrder] = useState<any | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState<any | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -73,7 +78,7 @@ function DashboardView() {
       // 1. Fetch completed orders for today
       const { data: ordersData } = await supabase
         .from('orders')
-        .select('*')
+        .select('*, order_items(*), payments(*)')
         .eq('status', 'COMPLETED')
         .eq('business_date', today)
         .order('client_completed_at', { ascending: false });
@@ -96,7 +101,7 @@ function DashboardView() {
   useEffect(() => {
     fetchData();
 
-    // Realtime subscription for completed orders
+    // Realtime subscription for orders (INSERT, UPDATE, DELETE)
     const channel = supabase
       .channel('owner_orders_realtime')
       .on(
@@ -104,6 +109,20 @@ function DashboardView() {
         { event: 'INSERT', schema: 'public', table: 'orders' },
         (payload) => {
           setOrders((prev) => [payload.new, ...prev]);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          setOrders((prev) => prev.map((o) => (o.id === payload.new.id ? { ...o, ...payload.new } : o)));
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'orders' },
+        (payload) => {
+          setOrders((prev) => prev.filter((o) => o.id !== (payload.old as any).id));
         }
       )
       .subscribe();
@@ -248,19 +267,60 @@ function DashboardView() {
                     {new Date(order.client_completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
                   <span className="font-black text-[#222222] tabular-nums">
                     {formatPaise(order.total_paise)}
                   </span>
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                    COMPLETED
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    order.status === 'COMPLETED'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : order.status === 'REFUNDED'
+                      ? 'bg-purple-50 text-purple-700 border-purple-200'
+                      : 'bg-red-50 text-red-700 border-red-200'
+                  }`}>
+                    {order.status}
                   </span>
+
+                  <div className="flex items-center gap-1 pl-1 border-l border-[#E8E3C3]">
+                    <button
+                      type="button"
+                      onClick={() => setEditingOrder(order)}
+                      aria-label="Edit Order"
+                      className="p-1 rounded-md border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8] text-[#777777] hover:text-[#C43C1E] transition-colors cursor-pointer"
+                      title="Edit Order"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeletingOrder(order)}
+                      aria-label="Delete Order"
+                      className="p-1 rounded-md border border-red-200 bg-white hover:bg-red-50 text-red-600 hover:text-red-700 transition-colors cursor-pointer"
+                      title="Delete Order"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <OwnerOrderEditModal
+        isOpen={Boolean(editingOrder)}
+        order={editingOrder}
+        onClose={() => setEditingOrder(null)}
+        onSaved={fetchData}
+      />
+
+      <OwnerOrderDeleteDialog
+        isOpen={Boolean(deletingOrder)}
+        order={deletingOrder}
+        onClose={() => setDeletingOrder(null)}
+        onDeleted={fetchData}
+      />
     </div>
   );
 }
@@ -272,33 +332,65 @@ function SalesView() {
   const [orders, setOrders] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingOrder, setEditingOrder] = useState<any | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState<any | null>(null);
+
+  const loadSales = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: oData } = await supabase
+        .from('orders')
+        .select('*, order_items(*), payments(*)')
+        .order('client_completed_at', { ascending: false })
+        .limit(100);
+
+      if (oData) setOrders(oData);
+
+      const { data: pData } = await supabase
+        .from('payments')
+        .select('*')
+        .limit(200);
+
+      if (pData) setPayments(pData);
+    } catch (err) {
+      console.warn('Sales fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    async function loadSales() {
-      setLoading(true);
-      try {
-        const { data: oData } = await supabase
-          .from('orders')
-          .select('*')
-          .order('client_completed_at', { ascending: false })
-          .limit(50);
-
-        if (oData) setOrders(oData);
-
-        const { data: pData } = await supabase
-          .from('payments')
-          .select('*')
-          .limit(100);
-
-        if (pData) setPayments(pData);
-      } catch (err) {
-        console.warn('Sales fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
     loadSales();
-  }, []);
+
+    const channel = supabase
+      .channel('owner_sales_realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'orders' },
+        (payload) => {
+          setOrders((prev) => [payload.new, ...prev]);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          setOrders((prev) => prev.map((o) => (o.id === payload.new.id ? { ...o, ...payload.new } : o)));
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'orders' },
+        (payload) => {
+          setOrders((prev) => prev.filter((o) => o.id !== (payload.old as any).id));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadSales]);
 
   // Split payment totals
   const cashTotal = payments.filter((p) => p.method === 'cash').reduce((sum, p) => sum + p.amount_paise, 0);
@@ -359,6 +451,7 @@ function SalesView() {
                   <th className="p-2.5">Tax (GST)</th>
                   <th className="p-2.5">Final Total</th>
                   <th className="p-2.5">Status</th>
+                  <th className="p-2.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E8E3C3]/50">
@@ -373,9 +466,39 @@ function SalesView() {
                     <td className="p-2.5 tabular-nums">{formatPaise(o.tax_paise)}</td>
                     <td className="p-2.5 font-black text-[#222222] tabular-nums">{formatPaise(o.total_paise)}</td>
                     <td className="p-2.5">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        o.status === 'COMPLETED'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : o.status === 'REFUNDED'
+                          ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : o.status === 'VOID'
+                          ? 'bg-zinc-100 text-zinc-700 border-zinc-200'
+                          : 'bg-red-50 text-red-700 border-red-200'
+                      }`}>
                         {o.status}
                       </span>
+                    </td>
+                    <td className="p-2.5 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setEditingOrder(o)}
+                          aria-label={`Edit Order ${o.token_seq}`}
+                          className="p-1.5 rounded-lg border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8] text-[#777777] hover:text-[#C43C1E] transition-colors cursor-pointer"
+                          title="Edit Order"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingOrder(o)}
+                          aria-label={`Delete Order ${o.token_seq}`}
+                          className="p-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 text-red-600 hover:text-red-700 transition-colors cursor-pointer"
+                          title="Delete Order"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -384,6 +507,20 @@ function SalesView() {
           </div>
         )}
       </div>
+
+      <OwnerOrderEditModal
+        isOpen={Boolean(editingOrder)}
+        order={editingOrder}
+        onClose={() => setEditingOrder(null)}
+        onSaved={loadSales}
+      />
+
+      <OwnerOrderDeleteDialog
+        isOpen={Boolean(deletingOrder)}
+        order={deletingOrder}
+        onClose={() => setDeletingOrder(null)}
+        onDeleted={loadSales}
+      />
     </div>
   );
 }
