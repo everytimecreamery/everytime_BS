@@ -18,13 +18,7 @@ import {
   completeOrderPayment,
   purgeExpiredCompletedOrders,
 } from '@/lib/pos/order';
-import {
-  saveCompletedOrderToOutbox,
-  initBackgroundSyncWorker,
-  persistActiveTickets,
-  loadActiveTickets,
-  generateUUID,
-} from '@/lib/sync/outbox';
+import { pushOrderToDatabase } from '@/lib/supabase/orders';
 import { DiscountConfig, formatPaise } from '@/lib/pos/calculations';
 import { formatOrderToken, formatTerminalToken } from '@/lib/utils';
 import { PosHeader } from './PosHeader';
@@ -52,29 +46,36 @@ export function StaffPOSWorkspace() {
 
   const [isOrderHistoryOpen, setIsOrderHistoryOpen] = useState(false);
 
-  // 1. Initialize background sync worker & rehydrate active processing tickets from IndexedDB
+  // 1. Rehydrate active processing tickets from localStorage on mount
   useEffect(() => {
-    const cleanupSync = initBackgroundSyncWorker();
-
-    loadActiveTickets().then((cache) => {
-      if (cache && Array.isArray(cache.tickets) && cache.tickets.length > 0) {
-        setOrders(cache.tickets);
-        if (cache.activeOrderId) {
-          setActiveOrderId(cache.activeOrderId);
+    try {
+      const saved = localStorage.getItem('active_pos_tickets_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.tickets) && parsed.tickets.length > 0) {
+          setOrders(parsed.tickets);
+          if (parsed.activeOrderId) {
+            setActiveOrderId(parsed.activeOrderId);
+          }
         }
       }
-    });
-
-    return () => {
-      cleanupSync();
-    };
+    } catch {
+      // ignore
+    }
   }, []);
 
-  // 2. Persist active PROCESSING tickets to IndexedDB on every mutation
+  // 2. Persist active PROCESSING tickets to localStorage on every mutation
   useEffect(() => {
-    const processingOnly = orders.filter((o) => o.status === 'PROCESSING');
-    if (processingOnly.length > 0) {
-      persistActiveTickets(processingOnly, activeOrderId);
+    try {
+      const processingOnly = orders.filter((o) => o.status === 'PROCESSING');
+      if (processingOnly.length > 0) {
+        localStorage.setItem(
+          'active_pos_tickets_v1',
+          JSON.stringify({ tickets: processingOnly, activeOrderId })
+        );
+      }
+    } catch {
+      // ignore
     }
   }, [orders, activeOrderId]);
 
@@ -315,7 +316,7 @@ export function StaffPOSWorkspace() {
       );
     };
 
-  // Workflow: Payment Confirmation (Completes active order and writes to IndexedDB Outbox)
+  // Workflow: Payment Confirmation (Completes active order and directly pushes to Supabase database)
   const handleConfirmPayment = (
     method: PaymentMethod,
     tenderedPaise?: number,
@@ -325,58 +326,12 @@ export function StaffPOSWorkspace() {
 
     const completedOrder = completeOrderPayment(activeOrder, method, tenderedPaise, changePaise);
 
-    // 1. Write to IndexedDB offline outbox FIRST (idempotent, offline-resilient)
-    const outboxItems = completedOrder.items.map((it) => ({
-      id: generateUUID(),
-      order_id: completedOrder.id,
-      menu_item_id: it.productId || null,
-      product_name: it.productName,
-      variant_label: it.variantLabel || null,
-      addon_label: it.addOnLabel || null,
-      quantity: it.quantity,
-      unit_price_paise: it.unitPricePaise,
-      addon_price_paise: 0,
-      total_price_paise: it.lineTotalPaise,
-    }));
-
-    const outboxPayments = [
-      {
-        id: generateUUID(),
-        order_id: completedOrder.id,
-        method: method.toLowerCase() as 'cash' | 'upi' | 'card',
-        amount_paise: completedOrder.totalPaise,
-        created_at: completedOrder.completedAt || new Date().toISOString(),
-      },
-    ];
-
-    const taxPaise = completedOrder.taxPreviewPaise;
-    const cgstPaise = completedOrder.cgstPaise ?? Math.round(taxPaise / 2);
-    const sgstPaise = completedOrder.sgstPaise ?? (taxPaise - cgstPaise);
-    const seqNum = parseInt(completedOrder.token.replace(/\D/g, '') || '1', 10);
-
-    saveCompletedOrderToOutbox({
-      id: completedOrder.id,
-      store_id: '00000000-0000-0000-0000-000000000001',
-      terminal_id: '00000000-0000-0000-0000-000000000002',
-      cashier_id: '00000000-0000-0000-0000-000000000003',
-      token_terminal: 'T1',
-      token_seq: seqNum,
-      status: 'COMPLETED',
-      subtotal_paise: completedOrder.subtotalPaise,
-      discount_paise: completedOrder.discountPaise,
-      discount_type: completedOrder.discount?.percent ? 'PERCENTAGE' : null,
-      tax_paise: taxPaise,
-      cgst_paise: cgstPaise,
-      sgst_paise: sgstPaise,
-      total_paise: completedOrder.totalPaise,
-      client_completed_at: completedOrder.completedAt || new Date().toISOString(),
-      business_date: completedOrder.businessDate || new Date().toISOString().split('T')[0],
-      items: outboxItems,
-      payments: outboxPayments,
-    });
+    // 1. Directly push completed order to Supabase database (immediately visible to Owner app)
+    pushOrderToDatabase(completedOrder, method, tenderedPaise, changePaise);
 
     // 2. Keep completed order in the active bar for 60 seconds (1-min auto reset)
     // and initialize next order token
+    const seqNum = parseInt(completedOrder.token.replace(/\D/g, '') || '1', 10);
     const nextSeq = seqNum + 1;
     const nextToken = `T1-${nextSeq.toString().padStart(3, '0')}`;
     const nextOrder = createNewPosOrder(nextToken);

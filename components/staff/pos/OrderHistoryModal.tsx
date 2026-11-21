@@ -8,11 +8,7 @@ import {
   filterAndSortOrderHistory,
   calculateHistoryRevenuePaise,
 } from '@/lib/pos/orderHistory';
-import {
-  getCompletedOrdersFromOutbox,
-  OutboxOrder,
-  triggerSync,
-} from '@/lib/sync/outbox';
+import { fetchOrdersFromDatabase } from '@/lib/supabase/orders';
 import { formatPaise } from '@/lib/pos/calculations';
 import { OrderReceiptView } from './OrderReceiptView';
 import {
@@ -75,57 +71,18 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
   const [sortOption, setSortOption] = useState<HistorySortOption>('newest');
   const [selectedOrder, setSelectedOrder] = useState<PosOrder | null>(null);
   const [historyOrders, setHistoryOrders] = useState<PosOrder[]>([]);
-  const [outboxRecords, setOutboxRecords] = useState<OutboxOrder[]>([]);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Load completed orders from IndexedDB outbox
+  // Load completed orders directly from Supabase database
   const loadOrders = useCallback(async () => {
+    setIsLoading(true);
     try {
-      const records = await getCompletedOrdersFromOutbox();
-      setOutboxRecords(records);
-
-      // Map OutboxOrder to PosOrder domain model for UI rendering
-      const mapped: PosOrder[] = records.map((rec) => ({
-        id: rec.id,
-        token: rec.token_terminal ? `${rec.token_terminal}-${rec.token_seq.toString().padStart(3, '0')}` : `#${rec.token_seq.toString().padStart(3, '0')}`,
-        status: 'COMPLETED',
-        items: (rec.items || []).map((it) => ({
-          lineId: it.id,
-          productId: it.menu_item_id || it.id,
-          productName: it.product_name,
-          variantId: it.variant_label || undefined,
-          variantLabel: it.variant_label || undefined,
-          addOnId: it.addon_label || undefined,
-          addOnLabel: it.addon_label || undefined,
-          unitPricePaise: it.unit_price_paise,
-          quantity: it.quantity,
-          lineTotalPaise: it.total_price_paise,
-          totalPricePaise: it.total_price_paise,
-        })),
-        subtotalPaise: rec.subtotal_paise,
-        discountPaise: rec.discount_paise,
-        taxPreviewPaise: rec.tax_paise,
-        cgstPaise: rec.cgst_paise,
-        sgstPaise: rec.sgst_paise,
-        totalPaise: rec.total_paise,
-        totalPayablePaise: rec.total_paise,
-        totalQuantity: (rec.items || []).reduce((sum, item) => sum + item.quantity, 0),
-        discount: {
-          type: (rec.discount_type?.toLowerCase() as any) || 'none',
-          percent: rec.discount_type === 'PERCENTAGE' ? Math.round((rec.discount_paise / (rec.subtotal_paise || 1)) * 100) : 0,
-        },
-        taxConfig: { ratePercent: 5, isProvisional: true },
-        paymentStatus: 'PAID',
-        paymentMethod: (rec.payments?.[0]?.method.toUpperCase() as any) || 'CASH',
-        createdAt: rec.client_completed_at,
-        updatedAt: rec.client_completed_at,
-        completedAt: rec.client_completed_at,
-        businessDate: rec.business_date,
-      }));
-
-      setHistoryOrders(mapped);
+      const ordersData = await fetchOrdersFromDatabase();
+      setHistoryOrders(ordersData);
     } catch (err) {
-      console.warn('Failed to load orders from outbox:', err);
+      console.warn('Failed to load orders from database:', err);
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
@@ -135,11 +92,8 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
     }
   }, [isOpen, loadOrders]);
 
-  const handleManualSync = async () => {
-    setIsSyncing(true);
-    await triggerSync();
+  const handleRefresh = async () => {
     await loadOrders();
-    setIsSyncing(false);
   };
 
   const handleClose = useCallback(() => {
@@ -212,10 +166,10 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
                 </div>
                 <div>
                   <h2 className="text-base font-black text-[#222222] tracking-tight">
-                    Order History & Synced Transactions
+                    Order History & Cloud Transactions
                   </h2>
                   <p className="text-xs text-[#777777]">
-                    IndexedDB Offline Outbox • Immutable Finalized Receipts
+                    Live Supabase Database • Immutable Finalized Receipts
                   </p>
                 </div>
               </div>
@@ -223,13 +177,13 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleManualSync}
-                  disabled={isSyncing}
-                  aria-label="Sync Outbox"
+                  onClick={handleRefresh}
+                  disabled={isLoading}
+                  aria-label="Refresh Database Orders"
                   className="h-8 px-2.5 rounded-lg border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8] text-xs font-bold text-[#222222] flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 text-[#C43C1E] ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                  <RefreshCw className={`w-3.5 h-3.5 text-[#C43C1E] ${isLoading ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">{isLoading ? 'Refreshing...' : 'Refresh'}</span>
                 </button>
 
                 <button
@@ -263,10 +217,10 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
               </div>
 
               <div className="bg-white p-2.5 rounded-xl border border-[#E8E3C3]/80">
-                <div className="text-[10.5px] font-bold text-[#777777] uppercase tracking-wider">Outbox Status</div>
+                <div className="text-[10.5px] font-bold text-[#777777] uppercase tracking-wider">Database Status</div>
                 <div className="text-xs font-bold text-emerald-700 flex items-center gap-1 mt-1">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Offline-First OK</span>
+                  <span>Cloud Live</span>
                 </div>
               </div>
             </div>
@@ -334,77 +288,57 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
                   </div>
                   <h3 className="text-sm font-bold text-[#222222]">No completed orders found</h3>
                   <p className="text-xs text-[#777777] mt-1 max-w-xs">
-                    Completed orders from this terminal automatically save to IndexedDB.
+                    Completed orders from this terminal are saved directly to the Supabase database.
                   </p>
                 </div>
               ) : (
-                filteredOrders.map((order) => {
-                  const outboxRecord = outboxRecords.find((r) => r.id === order.id);
-                  const syncStatus = outboxRecord?.sync_status || 'synced';
+                filteredOrders.map((order) => (
+                  <button
+                    key={order.id}
+                    type="button"
+                    onClick={() => setSelectedOrder(order)}
+                    className="w-full text-left p-3.5 rounded-xl border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8]/40 hover:border-[#C43C1E]/40 transition-all flex items-center justify-between gap-3 shadow-2xs group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#FAF8E8] border border-[#E8E3C3] flex items-center justify-center text-[#C43C1E] font-black text-xs shrink-0">
+                        {order.token}
+                      </div>
 
-                  return (
-                    <button
-                      key={order.id}
-                      type="button"
-                      onClick={() => setSelectedOrder(order)}
-                      className="w-full text-left p-3.5 rounded-xl border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8]/40 hover:border-[#C43C1E]/40 transition-all flex items-center justify-between gap-3 shadow-2xs group cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#FAF8E8] border border-[#E8E3C3] flex items-center justify-center text-[#C43C1E] font-black text-xs shrink-0">
-                          {order.token}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-[#222222]">
+                            {order.totalQuantity} {order.totalQuantity === 1 ? 'item' : 'items'}
+                          </span>
+                          <span className="text-[10px] text-[#777777]">
+                            {formatOrderDate(order.completedAt)} • {formatOrderTime(order.completedAt)}
+                          </span>
                         </div>
 
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-xs text-[#222222]">
-                              {order.totalQuantity} {order.totalQuantity === 1 ? 'item' : 'items'}
-                            </span>
-                            <span className="text-[10px] text-[#777777]">
-                              {formatOrderDate(order.completedAt)} • {formatOrderTime(order.completedAt)}
-                            </span>
-                          </div>
+                        <div className="text-[11px] text-[#777777] truncate max-w-xs sm:max-w-md mt-0.5">
+                          {order.items.map((it) => `${it.quantity}x ${it.productName}`).join(', ')}
+                        </div>
+                      </div>
+                    </div>
 
-                          <div className="text-[11px] text-[#777777] truncate max-w-xs sm:max-w-md mt-0.5">
-                            {order.items.map((it) => `${it.quantity}x ${it.productName}`).join(', ')}
-                          </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span className="hidden sm:inline">Database</span>
+                      </span>
+
+                      <div className="text-right">
+                        <div className="text-sm font-black text-[#222222] tabular-nums">
+                          {formatPaise(order.totalPaise)}
+                        </div>
+                        <div className="text-[10px] font-bold text-[#777777] uppercase">
+                          {order.paymentMethod}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0">
-                        {/* Sync Status Badge */}
-                        {syncStatus === 'synced' && (
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            <span className="hidden sm:inline">Synced</span>
-                          </span>
-                        )}
-                        {syncStatus === 'pending' && (
-                          <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-amber-600" />
-                            <span className="hidden sm:inline">Pending Sync</span>
-                          </span>
-                        )}
-                        {syncStatus === 'failed' && (
-                          <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3 text-red-600" />
-                            <span className="hidden sm:inline">Retrying</span>
-                          </span>
-                        )}
-
-                        <div className="text-right">
-                          <div className="text-sm font-black text-[#222222] tabular-nums">
-                            {formatPaise(order.totalPaise)}
-                          </div>
-                          <div className="text-[10px] font-bold text-[#777777] uppercase">
-                            {order.paymentMethod}
-                          </div>
-                        </div>
-
-                        <ChevronRight className="w-4 h-4 text-[#777777] group-hover:text-[#C43C1E] transition-colors" />
-                      </div>
-                    </button>
-                  );
-                })
+                      <ChevronRight className="w-4 h-4 text-[#777777] group-hover:text-[#C43C1E] transition-colors" />
+                    </div>
+                  </button>
+                ))
               )}
             </div>
           </>
