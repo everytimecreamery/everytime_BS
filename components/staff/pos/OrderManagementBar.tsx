@@ -41,11 +41,15 @@ function OrderCard({ order, isActive, onSelect }: OrderCardProps) {
       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
       : 'bg-zinc-100 text-zinc-600 border-zinc-200';
 
+  const shortSeq = order.token.startsWith('#')
+    ? order.token
+    : '#' + (order.token.split('-')[1] || order.token);
+
   return (
     <button
       type="button"
       onClick={onSelect}
-      aria-label={`Order ${order.token} ${order.status} ${order.totalQuantity} items ${formatPaise(order.totalPaise)}`}
+      aria-label={`Order ${order.token} ${shortSeq} ${order.status} ${order.totalQuantity} items ${formatPaise(order.totalPaise)}`}
       aria-pressed={isActive}
       className={`relative shrink-0 text-left px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer select-none min-w-[170px] ${
         isActive
@@ -92,14 +96,13 @@ export function OrderManagementBar({
   onSelectOrder,
 }: OrderManagementBarProps) {
   const processingOrders = orders.filter((o) => o.status === 'PROCESSING');
-  const completedOrders = orders.filter((o) => o.status === 'COMPLETED');
 
   return (
     <section
       aria-label="Active Customer Orders Queue"
-      className="bg-white rounded-2xl border border-[#E8E3C3] p-2 sm:px-3 sm:py-2 shadow-2xs shrink-0 max-h-[86px] overflow-hidden grid grid-cols-1 md:grid-cols-2 gap-3"
+      className="bg-white rounded-2xl border border-[#E8E3C3] p-2 sm:px-3 sm:py-2 shadow-2xs shrink-0 max-h-[86px] overflow-hidden"
     >
-      {/* 1. PROCESSING QUEUE */}
+      {/* PROCESSING QUEUE */}
       <div className="flex flex-col gap-1 min-w-0">
         <div className="flex items-center gap-1.5 px-0.5">
           <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
@@ -118,39 +121,6 @@ export function OrderManagementBar({
             </span>
           ) : (
             processingOrders.map((order) => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                isActive={order.id === activeOrderId}
-                onSelect={() => onSelectOrder(order.id)}
-              />
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* 2. COMPLETED QUEUE (Auto-resets every 1m) */}
-      <div className="flex flex-col gap-1 min-w-0 border-l border-[#E8E3C3]/60 pl-3 hidden md:flex">
-        <div className="flex items-center gap-1.5 px-0.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          <span className="text-[11px] font-extrabold uppercase tracking-wide text-[#222222]">
-            Completed
-          </span>
-          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-900">
-            {completedOrders.length}
-          </span>
-          <span className="text-[9px] font-medium text-[#777777] italic ml-auto">
-            Auto-clears in 1m
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-thin">
-          {completedOrders.length === 0 ? (
-            <span className="text-[11px] text-[#777777] italic py-1 px-1">
-              No recent completed orders
-            </span>
-          ) : (
-            completedOrders.map((order) => (
               <OrderCard
                 key={order.id}
                 order={order}

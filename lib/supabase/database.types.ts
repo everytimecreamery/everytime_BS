@@ -138,6 +138,7 @@ export interface Database {
           icon_name: string;
           sort_order: number;
           is_active: boolean;
+          is_archived: boolean;
           created_at: string;
         };
         Insert: {
@@ -146,6 +147,7 @@ export interface Database {
           icon_name: string;
           sort_order?: number;
           is_active?: boolean;
+          is_archived?: boolean;
           created_at?: string;
         };
         Update: {
@@ -154,6 +156,7 @@ export interface Database {
           icon_name?: string;
           sort_order?: number;
           is_active?: boolean;
+          is_archived?: boolean;
           created_at?: string;
         };
       };
@@ -165,6 +168,9 @@ export interface Database {
           base_price_paise: number;
           interaction_type: string;
           is_available: boolean;
+          is_archived: boolean;
+          is_frequent: boolean;
+          portion_grams: number;
           is_premium: boolean;
           description: string | null;
           updated_at: string;
@@ -177,6 +183,9 @@ export interface Database {
           base_price_paise: number;
           interaction_type?: string;
           is_available?: boolean;
+          is_archived?: boolean;
+          is_frequent?: boolean;
+          portion_grams?: number;
           is_premium?: boolean;
           description?: string | null;
           updated_at?: string;
@@ -189,6 +198,9 @@ export interface Database {
           base_price_paise?: number;
           interaction_type?: string;
           is_available?: boolean;
+          is_archived?: boolean;
+          is_frequent?: boolean;
+          portion_grams?: number;
           is_premium?: boolean;
           description?: string | null;
           updated_at?: string;
@@ -202,6 +214,7 @@ export interface Database {
           label: string;
           price_paise: number;
           volume_ml: number | null;
+          is_archived: boolean;
           created_at: string;
         };
         Insert: {
@@ -210,6 +223,7 @@ export interface Database {
           label: string;
           price_paise: number;
           volume_ml?: number | null;
+          is_archived?: boolean;
           created_at?: string;
         };
         Update: {
@@ -218,6 +232,7 @@ export interface Database {
           label?: string;
           price_paise?: number;
           volume_ml?: number | null;
+          is_archived?: boolean;
           created_at?: string;
         };
       };

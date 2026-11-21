@@ -48,6 +48,10 @@ export interface MenuItem {
   basePricePaise: number;
   interactionType: MenuInteractionType;
   isPremium?: boolean;
+  isFrequent?: boolean;
+  isAvailable?: boolean;
+  isArchived?: boolean;
+  portionGrams?: number;
   variants?: MenuItemVariant[];
   addOns?: MenuItemAddOn[];
   description?: string;

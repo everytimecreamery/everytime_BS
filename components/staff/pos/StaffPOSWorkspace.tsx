@@ -4,8 +4,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   CategoryId,
   MenuItem,
-  getMenuItemsByCategory,
 } from '@/lib/mock/menu';
+import { useStaffMenuCatalog } from '@/lib/pos/menuCatalog';
 import {
   PosOrder,
   PaymentMethod,
@@ -19,6 +19,7 @@ import {
   purgeExpiredCompletedOrders,
 } from '@/lib/pos/order';
 import { pushOrderToDatabase } from '@/lib/supabase/orders';
+import { addOrderToHistory } from '@/lib/pos/orderHistory';
 import { DiscountConfig, formatPaise } from '@/lib/pos/calculations';
 import { formatOrderToken, formatTerminalToken } from '@/lib/utils';
 import { PosHeader } from './PosHeader';
@@ -37,11 +38,12 @@ import { OrderHistoryModal } from './OrderHistoryModal';
 import { ShoppingBag } from 'lucide-react';
 
 export function StaffPOSWorkspace() {
+  const { categories: catalogCategories, getItemsByCategory } = useStaffMenuCatalog();
   const [activeCategoryId, setActiveCategoryId] = useState<CategoryId>('frequent');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Orders state: Multi-order session array (starts reliably at T1-001)
-  const [orders, setOrders] = useState<PosOrder[]>(() => [createNewPosOrder('T1-001')]);
+  // Orders state: Multi-order session array (starts reliably at #001)
+  const [orders, setOrders] = useState<PosOrder[]>(() => [createNewPosOrder()]);
   const [activeOrderId, setActiveOrderId] = useState<string>(() => orders[0]?.id || '');
 
   const [isOrderHistoryOpen, setIsOrderHistoryOpen] = useState(false);
@@ -102,10 +104,10 @@ export function StaffPOSWorkspace() {
   const [isPaymentPreviewOpen, setIsPaymentPreviewOpen] = useState(false);
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
 
-  // Products for currently selected category
+  // Products for currently selected category (dynamic live catalog)
   const categoryProducts = useMemo(() => {
-    return getMenuItemsByCategory(activeCategoryId);
-  }, [activeCategoryId]);
+    return getItemsByCategory(activeCategoryId);
+  }, [activeCategoryId, getItemsByCategory]);
 
   // Filtered products based on search query
   const displayedProducts = useMemo(() => {
@@ -131,8 +133,7 @@ export function StaffPOSWorkspace() {
     }
 
     // Create a new independent working order with next sequential token
-    const nextToken = formatOrderToken(orders.length + 1);
-    const newOrder = createNewPosOrder(nextToken);
+    const newOrder = createNewPosOrder();
     setOrders((prev) => [...prev, newOrder]);
     setActiveOrderId(newOrder.id);
   };
@@ -329,16 +330,15 @@ export function StaffPOSWorkspace() {
     // 1. Directly push completed order to Supabase database (immediately visible to Owner app)
     pushOrderToDatabase(completedOrder, method, tenderedPaise, changePaise);
 
-    // 2. Keep completed order in the active bar for 60 seconds (1-min auto reset)
-    // and initialize next order token
-    const seqNum = parseInt(completedOrder.token.replace(/\D/g, '') || '1', 10);
-    const nextSeq = seqNum + 1;
-    const nextToken = `T1-${nextSeq.toString().padStart(3, '0')}`;
-    const nextOrder = createNewPosOrder(nextToken);
+    // 2. Persist to permanent local order history
+    addOrderToHistory(completedOrder);
+
+    // 3. Clear from active queue and initialize next order token
+    const nextOrder = createNewPosOrder();
 
     setOrders((prev) => {
-      const otherOrders = prev.filter((o) => o.id !== activeOrder.id);
-      return [...otherOrders, completedOrder, nextOrder];
+      const otherOrders = prev.filter((o) => o.id !== activeOrder.id && o.status === 'PROCESSING');
+      return [...otherOrders, nextOrder];
     });
 
     setActiveOrderId(nextOrder.id);
@@ -397,6 +397,7 @@ export function StaffPOSWorkspace() {
                     >
                       <CategorySidebar
                         activeCategoryId={activeCategoryId}
+                        categories={catalogCategories}
                         onSelectCategory={(id) => {
                           setActiveCategoryId(id);
                           setSearchQuery('');

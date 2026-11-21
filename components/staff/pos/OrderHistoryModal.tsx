@@ -7,6 +7,7 @@ import {
   HistorySortOption,
   filterAndSortOrderHistory,
   calculateHistoryRevenuePaise,
+  loadOrderHistory,
 } from '@/lib/pos/orderHistory';
 import { fetchOrdersFromDatabase } from '@/lib/supabase/orders';
 import { formatPaise } from '@/lib/pos/calculations';
@@ -70,15 +71,22 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
   const [customEnd, setCustomEnd] = useState('');
   const [sortOption, setSortOption] = useState<HistorySortOption>('newest');
   const [selectedOrder, setSelectedOrder] = useState<PosOrder | null>(null);
-  const [historyOrders, setHistoryOrders] = useState<PosOrder[]>([]);
+  const [historyOrders, setHistoryOrders] = useState<PosOrder[]>(() => loadOrderHistory());
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load completed orders directly from Supabase database
+  // Load completed orders: reads local history first, then syncs with Supabase database
   const loadOrders = useCallback(async () => {
+    const local = loadOrderHistory();
+    if (local && local.length > 0) {
+      setHistoryOrders(local);
+    }
+
     setIsLoading(true);
     try {
       const ordersData = await fetchOrdersFromDatabase();
-      setHistoryOrders(ordersData);
+      if (ordersData && ordersData.length > 0) {
+        setHistoryOrders(ordersData);
+      }
     } catch (err) {
       console.warn('Failed to load orders from database:', err);
     } finally {
@@ -235,6 +243,7 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search by token, item name, or date..."
+                    aria-label="Search orders"
                     className="w-full pl-9 pr-8 py-2 rounded-xl border border-[#E8E3C3] bg-[#FAF8E8]/30 focus:bg-white text-xs font-medium text-[#222222] focus:outline-none focus:ring-2 focus:ring-[#C43C1E]/30 transition-all placeholder:text-[#777777]/70"
                   />
                   {searchQuery && (
@@ -296,6 +305,7 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
                   <button
                     key={order.id}
                     type="button"
+                    aria-label={`View receipt for order ${order.token}`}
                     onClick={() => setSelectedOrder(order)}
                     className="w-full text-left p-3.5 rounded-xl border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8]/40 hover:border-[#C43C1E]/40 transition-all flex items-center justify-between gap-3 shadow-2xs group cursor-pointer"
                   >

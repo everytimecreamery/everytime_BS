@@ -8,11 +8,18 @@ import {
   Cherry,
   UtensilsCrossed,
   CupSoda,
+  Milk,
   Package,
   Coffee,
+  Sparkles,
+  Tag,
+  Box,
+  Heart,
+  Smile,
+  Star,
   LucideIcon,
 } from 'lucide-react';
-import { MENU_CATEGORIES, CategoryId } from '@/lib/mock/menu';
+import { MENU_CATEGORIES, CategoryId, MenuCategory } from '@/lib/mock/menu';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   Flame,
@@ -21,19 +28,29 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Cherry,
   UtensilsCrossed,
   CupSoda,
+  Milk,
   Package,
   Coffee,
+  Sparkles,
+  Tag,
+  Box,
+  Heart,
+  Smile,
+  Star,
 };
 
 interface CategorySidebarProps {
   activeCategoryId: CategoryId;
   onSelectCategory: (id: CategoryId) => void;
+  categories?: MenuCategory[];
 }
 
 export function CategorySidebar({
   activeCategoryId,
   onSelectCategory,
+  categories,
 }: CategorySidebarProps) {
+  const displayCategories = categories && categories.length > 0 ? categories : MENU_CATEGORIES;
   return (
     <aside
       aria-label="Category Sidebar"
@@ -49,7 +66,7 @@ export function CategorySidebar({
         aria-label="Menu Categories"
         className="flex flex-row md:flex-col gap-1.5 w-full min-w-max md:min-w-0"
       >
-        {MENU_CATEGORIES.map((category) => {
+        {displayCategories.map((category) => {
           const IconComponent = ICON_MAP[category.iconName] || IceCream;
           const isActive = activeCategoryId === category.id;
 

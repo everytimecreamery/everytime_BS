@@ -157,7 +157,7 @@ describe('Staff POS Order History Feature Tests', () => {
     expect(loadOrderHistory()).toHaveLength(1);
   });
 
-  it('7. Edit Order button appears on historical receipt and opens editable order mode', () => {
+  it('7. Invariant 4: Completed orders are strictly read-only on the staff terminal', () => {
     let order = createNewPosOrder('#001');
     order = addItemToOrder(order, { productId: 'gelato-classic-vanilla', productName: 'Classic Vanilla', unitPricePaise: 16900 });
     order = completeOrderPayment(order, 'CASH', 20000, 2255);
@@ -172,90 +172,10 @@ describe('Staff POS Order History Feature Tests', () => {
     // Open receipt
     fireEvent.click(within(historyDialog).getByRole('button', { name: /View receipt for order #001/i }));
 
-    // Verify Edit Order button is in receipt header actions
-    const editBtn = within(historyDialog).getByRole('button', { name: /Edit Order/i });
-    expect(editBtn).toBeInTheDocument();
+    // Verify Read-Only Receipt Preview is in receipt header actions
+    expect(within(historyDialog).getByText(/Official Receipt Preview \(Read-Only\)/i)).toBeInTheDocument();
 
-    // Click Edit Order
-    fireEvent.click(editBtn);
-
-    // Verify switched into Edit Order mode
-    expect(within(historyDialog).getByText(/Editing Order #001/i)).toBeInTheDocument();
-    expect(within(historyDialog).getByRole('button', { name: /Save Changes/i })).toBeInTheDocument();
-    expect(within(historyDialog).getByRole('button', { name: /Cancel/i })).toBeInTheDocument();
-  });
-
-  it('8. Edit Order: modifying quantity and saving updates receipt with modification audit trail', () => {
-    let order = createNewPosOrder('#001');
-    order = addItemToOrder(order, { productId: 'gelato-classic-vanilla', productName: 'Classic Vanilla', unitPricePaise: 16900 });
-    order = completeOrderPayment(order, 'CASH', 20000, 2255);
-    const initialPaidTotal = order.totalPaise;
-    addOrderToHistory(order);
-
-    render(<StaffPOSWorkspace />);
-
-    fireEvent.click(screen.getByRole('button', { name: /Order History/i }));
-    const historyDialog = screen.getByRole('dialog', { name: /Order History/i });
-    fireEvent.click(within(historyDialog).getByRole('button', { name: /View receipt for order #001/i }));
-
-    // Click Edit Order
-    fireEvent.click(within(historyDialog).getByRole('button', { name: /Edit Order/i }));
-
-    // Increase Classic Vanilla quantity from 1 to 2
-    const increaseBtn = within(historyDialog).getByRole('button', { name: /Increase quantity of Classic Vanilla/i });
-    fireEvent.click(increaseBtn);
-
-    // Click Save Changes
-    fireEvent.click(within(historyDialog).getByRole('button', { name: /Save Changes/i }));
-
-    // Returned to read-only receipt view
-    expect(within(historyDialog).getByText(/ORDER CONFIRMED & PAID/i)).toBeInTheDocument();
-    expect(within(historyDialog).getByText(/Order #001 modified and saved successfully!/i)).toBeInTheDocument();
-
-    // Modification History audit trail must be displayed
-    expect(within(historyDialog).getByText(/Modification History/i)).toBeInTheDocument();
-    expect(within(historyDialog).getByText(/Modification #1/i)).toBeInTheDocument();
-    expect(within(historyDialog).getByText(/Payment Reconciliation/i)).toBeInTheDocument();
-    expect(within(historyDialog).getByText(/Additional Amount Due/i)).toBeInTheDocument();
-
-    // Verify stored in localStorage
-    const saved = loadOrderHistory()[0];
-    expect(saved.totalPaise).toBeGreaterThan(initialPaidTotal);
-    expect(saved.modificationCount).toBe(1);
-    expect(saved.originalPayment?.totalPaise).toBe(initialPaidTotal);
-    expect(saved.originalPayment?.method).toBe('CASH');
-  });
-
-  it('9. Edit Order: canceling edit discards modifications and restores original order', () => {
-    let order = createNewPosOrder('#001');
-    order = addItemToOrder(order, { productId: 'gelato-classic-vanilla', productName: 'Classic Vanilla', unitPricePaise: 16900 });
-    order = completeOrderPayment(order, 'UPI');
-    const initialTotal = order.totalPaise;
-    addOrderToHistory(order);
-
-    render(<StaffPOSWorkspace />);
-
-    fireEvent.click(screen.getByRole('button', { name: /Order History/i }));
-    const historyDialog = screen.getByRole('dialog', { name: /Order History/i });
-    fireEvent.click(within(historyDialog).getByRole('button', { name: /View receipt for order #001/i }));
-
-    fireEvent.click(within(historyDialog).getByRole('button', { name: /Edit Order/i }));
-
-    // Increase quantity
-    fireEvent.click(within(historyDialog).getByRole('button', { name: /Increase quantity of Classic Vanilla/i }));
-
-    // Click Cancel
-    fireEvent.click(within(historyDialog).getByRole('button', { name: /Cancel/i }));
-
-    // Discard confirmation dialog should appear
-    expect(screen.getByText(/Discard Unsaved Changes\?/i)).toBeInTheDocument();
-
-    // Confirm Discard
-    fireEvent.click(screen.getByRole('button', { name: /Discard Changes/i }));
-
-    // Restores read-only receipt with original price
-    expect(within(historyDialog).getByText(/ORDER CONFIRMED & PAID/i)).toBeInTheDocument();
-    expect(loadOrderHistory()[0].totalPaise).toBe(initialTotal);
-    expect(loadOrderHistory()[0].modificationCount ?? 0).toBe(0);
+    // Verify Invariant 4: No post-completion edit button on staff terminal
+    expect(within(historyDialog).queryByRole('button', { name: /Edit Order/i })).not.toBeInTheDocument();
   });
 });

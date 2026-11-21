@@ -25,6 +25,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { OwnerOrderEditModal, OwnerOrderDeleteDialog } from './OwnerOrderActionModal';
+import { OwnerMenuManagementView } from './menu/OwnerMenuManagementView';
 
 interface OwnerSectionViewProps {
   sectionId: string;
@@ -37,7 +38,7 @@ export function OwnerSectionView({ sectionId }: OwnerSectionViewProps) {
     case 'reports':
       return <ReportsView />;
     case 'menu':
-      return <MenuManagementView />;
+      return <OwnerMenuManagementView />;
     case 'staff-management':
       return <StaffManagementView />;
     case 'settings':
@@ -584,93 +585,7 @@ function ReportsView() {
   );
 }
 
-// -----------------------------------------------------------------------------
-// 4. MENU MANAGEMENT VIEW
-// -----------------------------------------------------------------------------
-function MenuManagementView() {
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function loadMenu() {
-      setLoading(true);
-      try {
-        const { data } = await supabase
-          .from('menu_items')
-          .select('*')
-          .order('name');
-
-        if (data) setItems(data);
-      } catch (err) {
-        console.warn('Menu items fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadMenu();
-  }, []);
-
-  const toggleAvailability = async (id: string, current: boolean) => {
-    try {
-      await supabase
-        .from('menu_items')
-        .update({ is_available: !current, updated_at: new Date().toISOString() })
-        .eq('id', id);
-
-      setItems((prev) =>
-        prev.map((it) => (it.id === id ? { ...it, is_available: !current } : it))
-      );
-    } catch (err) {
-      console.warn('Failed to update availability:', err);
-    }
-  };
-
-  return (
-    <div className="bg-white rounded-xl border border-[#E8E3C3] p-5 shadow-xs">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-sm font-bold text-[#222222]">Master Menu & Flavor Availability</h3>
-          <p className="text-xs text-[#777777]">Toggling availability syncs to the staff counter terminal.</p>
-        </div>
-        <span className="text-xs font-bold text-[#C43C1E] bg-[#FAF8E8] px-2.5 py-1 rounded-lg border border-[#E8E3C3]">
-          {items.length} Products
-        </span>
-      </div>
-
-      {loading ? (
-        <div className="text-center py-8 text-xs text-[#777777]">Loading menu from Supabase...</div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {items.map((it) => (
-            <div
-              key={it.id}
-              className={`p-3 rounded-xl border transition-all flex items-center justify-between ${
-                it.is_available ? 'bg-white border-[#E8E3C3]' : 'bg-zinc-50 border-zinc-200 opacity-60'
-              }`}
-            >
-              <div>
-                <div className="font-bold text-xs text-[#222222]">{it.name}</div>
-                <div className="text-[11px] text-[#777777] font-semibold">{formatPaise(it.base_price_paise)}</div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => toggleAvailability(it.id, it.is_available)}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
-                  it.is_available
-                    ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                    : 'bg-zinc-200 text-zinc-700 hover:bg-zinc-300'
-                }`}
-              >
-                {it.is_available ? 'In Stock' : 'Sold Out'}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // -----------------------------------------------------------------------------
 // 5. STAFF MANAGEMENT VIEW
