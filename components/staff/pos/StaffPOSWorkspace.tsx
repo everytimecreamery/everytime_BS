@@ -37,69 +37,37 @@ import { PaymentPreviewDialog } from './PaymentPreviewDialog';
 import { OrderHistoryModal } from './OrderHistoryModal';
 import { ShoppingBag } from 'lucide-react';
 
-import { DEFAULT_TAX_CONFIG } from '@/lib/pos/calculations';
-
-const DEFAULT_EMPTY_ORDER: PosOrder = {
-  id: 'skeleton',
-  token: '#001',
-  status: 'PROCESSING',
-  items: [],
-  subtotalPaise: 0,
-  discountPaise: 0,
-  taxPreviewPaise: 0,
-  cgstPaise: 0,
-  sgstPaise: 0,
-  totalPaise: 0,
-  totalPayablePaise: 0,
-  totalQuantity: 0,
-  discount: { type: 'none', percent: 0 },
-  taxConfig: DEFAULT_TAX_CONFIG,
-  paymentStatus: 'UNPAID',
-  paymentMethod: null,
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
-  completedAt: null,
-  businessDate: '2026-01-01',
-};
-
 export function StaffPOSWorkspace() {
   const { categories: catalogCategories, getItemsByCategory } = useStaffMenuCatalog();
   const [activeCategoryId, setActiveCategoryId] = useState<CategoryId>('frequent');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Orders state: Initialized empty for deterministic SSR; loaded post-mount in useEffect
-  const [orders, setOrders] = useState<PosOrder[]>([]);
-  const [activeOrderId, setActiveOrderId] = useState<string>('');
-  const [isMounted, setIsMounted] = useState<boolean>(false);
+  // Orders state: Multi-order session array (starts reliably at #001)
+  const [orders, setOrders] = useState<PosOrder[]>(() => [createNewPosOrder()]);
+  const [activeOrderId, setActiveOrderId] = useState<string>(() => orders[0]?.id || '');
 
   const [isOrderHistoryOpen, setIsOrderHistoryOpen] = useState(false);
 
-  // 1. Post-mount hydration & order restoration from client storage
+  // 1. Rehydrate active processing tickets from localStorage on mount
   useEffect(() => {
-    setIsMounted(true);
     try {
       const saved = localStorage.getItem('active_pos_tickets_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed.tickets) && parsed.tickets.length > 0) {
           setOrders(parsed.tickets);
-          setActiveOrderId(parsed.activeOrderId || parsed.tickets[0].id);
-          return;
+          if (parsed.activeOrderId) {
+            setActiveOrderId(parsed.activeOrderId);
+          }
         }
       }
     } catch {
       // ignore
     }
-
-    // If no active saved tickets, seed initial clean order
-    const initialOrder = createNewPosOrder();
-    setOrders([initialOrder]);
-    setActiveOrderId(initialOrder.id);
   }, []);
 
-  // 2. Persist active PROCESSING tickets to localStorage on every mutation (after mount)
+  // 2. Persist active PROCESSING tickets to localStorage on every mutation
   useEffect(() => {
-    if (!isMounted || orders.length === 0) return;
     try {
       const processingOnly = orders.filter((o) => o.status === 'PROCESSING');
       if (processingOnly.length > 0) {
@@ -111,7 +79,7 @@ export function StaffPOSWorkspace() {
     } catch {
       // ignore
     }
-  }, [orders, activeOrderId, isMounted]);
+  }, [orders, activeOrderId]);
 
   // 3. Auto-purge completed orders from active queue after 60 seconds (1-minute auto-reset)
   useEffect(() => {
@@ -121,15 +89,10 @@ export function StaffPOSWorkspace() {
     return () => clearInterval(timer);
   }, []);
 
-  // Ensure activeOrderId always points to a valid order (or deterministic skeleton during SSR)
+  // Ensure activeOrderId always points to a valid order
   const activeOrder = useMemo(() => {
     const found = orders.find((o) => o.id === activeOrderId);
-    return (
-      found ||
-      orders.find((o) => o.status === 'PROCESSING') ||
-      orders[0] ||
-      DEFAULT_EMPTY_ORDER
-    );
+    return found || orders.find((o) => o.status === 'PROCESSING') || orders[0];
   }, [orders, activeOrderId]);
 
   // Dialog states

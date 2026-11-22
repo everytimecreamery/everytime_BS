@@ -53,7 +53,4 @@ Full CRUD for categories, menu items, and variants is active in the Owner Portal
 - **Reserved Categories**: `'frequent'` is a virtual category driven by `is_frequent = true` on menu items (no deletable row); `'extra'` is protected from archiving.
 - **Add Mode Derivation**: Items with 0 variants use Direct Add; items with variants open Options Dialogs.
 
-## SSR Hydration Invariant
-No render-time Date.now() in SSR output; client-only data loads after mount.
-
 

@@ -52,55 +52,10 @@ export function generateUUID(): string {
 }
 
 /**
- * Explicit pinned time formatters to eliminate timezone and SSR/client hydration drift.
- * Locked to locale 'en-IN', timeZone 'Asia/Kolkata', hour12: true.
- */
-export const orderTimeFormatter = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'Asia/Kolkata',
-  hour: 'numeric',
-  minute: '2-digit',
-  hour12: true,
-});
-
-export const clockFormatter = new Intl.DateTimeFormat('en-IN', {
-  timeZone: 'Asia/Kolkata',
-  hour: 'numeric',
-  minute: '2-digit',
-  hour12: true,
-});
-
-/**
- * Pure, deterministic formatter for stored order timestamps (order.createdAt / order.completedAt).
- * Guaranteed to return identical output regardless of host OS timezone (UTC, IST, EST).
- */
-export function formatOrderTime(isoString?: string | number | Date | null): string {
-  if (!isoString) return '--:--';
-  try {
-    const d = typeof isoString === 'object' && isoString instanceof Date ? isoString : new Date(isoString);
-    if (isNaN(d.getTime())) return '--:--';
-    return orderTimeFormatter.format(d);
-  } catch {
-    return '--:--';
-  }
-}
-
-/**
- * Formats a live clock date for header display.
- */
-export function formatClockTime(date?: Date | string | number | null): string {
-  if (!date) return '--:-- --';
-  try {
-    const d = typeof date === 'object' && date instanceof Date ? date : new Date(date);
-    if (isNaN(d.getTime())) return '--:-- --';
-    return clockFormatter.format(d);
-  } catch {
-    return '--:-- --';
-  }
-}
-
-/**
  * Formats a date into a clean time string for counter slips and logs (e.g., "02:30 PM")
  */
 export function formatDisplayTime(date: Date | string | number): string {
-  return formatOrderTime(date);
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '--:--';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }

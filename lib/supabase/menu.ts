@@ -238,6 +238,42 @@ export async function setMenuItemArchived(
 }
 
 /**
+ * Permanently deletes a menu item and its variants if not referenced by order_items.
+ */
+export async function deleteMenuItemPermanently(
+  id: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Check if referenced by order_items
+    const { data: orderRefs, error: refErr } = await supabase
+      .from('order_items')
+      .select('id')
+      .eq('menu_item_id', id)
+      .limit(1);
+
+    if (refErr) console.warn('[deleteMenuItemPermanently] Reference check error:', refErr);
+    if (orderRefs && orderRefs.length > 0) {
+      return {
+        success: false,
+        error: 'Cannot permanently delete an item that has past completed orders. Please archive it instead to preserve sales history.',
+      };
+    }
+
+    // 2. Delete variants first
+    await (supabase as any).from('menu_variants').delete().eq('menu_item_id', id);
+
+    // 3. Delete item
+    const { error: delErr } = await (supabase as any).from('menu_items').delete().eq('id', id);
+    if (delErr) throw delErr;
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('[deleteMenuItemPermanently] Error:', err);
+    return { success: false, error: err?.message || 'Failed to delete item.' };
+  }
+}
+
+/**
  * Saves (creates or edits) a category.
  */
 export async function saveCategory(

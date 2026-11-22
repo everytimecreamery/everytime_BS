@@ -191,16 +191,12 @@ export function filterStaffCategoryItems(
 export function useStaffMenuCatalog() {
   const [categories, setCategories] = useState<MenuCategory[]>(() => {
     const cached = loadCachedCatalog();
-    return cached?.categories && cached.categories.length > 0
-      ? cached.categories
-      : MENU_CATEGORIES;
+    return cached?.categories ? cached.categories : MENU_CATEGORIES;
   });
 
   const [items, setItems] = useState<MenuItem[]>(() => {
     const cached = loadCachedCatalog();
-    return cached?.items && cached.items.length > 0
-      ? cached.items
-      : ALL_MENU_ITEMS;
+    return cached?.items ? cached.items : ALL_MENU_ITEMS;
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -211,10 +207,10 @@ export function useStaffMenuCatalog() {
     setIsLoading(true);
     const result = await fetchCatalogFromSupabase();
     if (result) {
-      if (result.categories.length > 0) {
+      if (result.categories) {
         setCategories(result.categories);
       }
-      if (result.items.length > 0) {
+      if (result.items) {
         setItems(result.items);
       }
     }

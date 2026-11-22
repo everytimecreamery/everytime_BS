@@ -401,8 +401,29 @@ export function OwnerMenuManagementView() {
                 Loading master menu catalog...
               </div>
             ) : filteredItems.length === 0 ? (
-              <div className="text-center py-12 text-xs text-[#777777]">
-                No menu items found matching the selected filters.
+              <div className="text-center py-16 px-4 flex flex-col items-center justify-center">
+                <div className="w-12 h-12 rounded-2xl bg-[#FAF8E8] text-[#C43C1E] border border-[#E8E3C3] flex items-center justify-center mb-3">
+                  <IceCream className="w-6 h-6" />
+                </div>
+                <h4 className="text-sm font-bold text-[#222222]">No Menu Items Found</h4>
+                <p className="text-xs text-[#777777] mt-1 max-w-sm">
+                  {searchQuery || categoryFilter !== 'all' || statusFilter !== 'all'
+                    ? 'No products match the selected filters or search query.'
+                    : 'The menu is currently empty. Click "+ Add Menu Item" to start creating your new products.'}
+                </p>
+                {!searchQuery && categoryFilter === 'all' && statusFilter === 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedItem(null);
+                      setItemFormOpen(true);
+                    }}
+                    className="mt-4 flex items-center gap-2 px-4 py-2 bg-[#C43C1E] hover:bg-[#a83319] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Add First Menu Item</span>
+                  </button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
