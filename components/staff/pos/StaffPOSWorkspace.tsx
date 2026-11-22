@@ -27,6 +27,7 @@ import { OrderManagementBar } from './OrderManagementBar';
 import { CategorySidebar } from './CategorySidebar';
 import { ProductSearch } from './ProductSearch';
 import { ProductGrid } from './ProductGrid';
+import { PriceTierChips, derivePriceTiers } from './PriceTierChips';
 import { CartPanel } from './CartPanel';
 import { GelatoVariantDialog } from './GelatoVariantDialog';
 import { WaffleOptionsDialog } from './WaffleOptionsDialog';
@@ -40,6 +41,7 @@ import { ShoppingBag } from 'lucide-react';
 export function StaffPOSWorkspace() {
   const { categories: catalogCategories, getItemsByCategory } = useStaffMenuCatalog();
   const [activeCategoryId, setActiveCategoryId] = useState<CategoryId>('frequent');
+  const [selectedPriceTier, setSelectedPriceTier] = useState<number | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Orders state: Multi-order session array (starts reliably at #001)
@@ -109,12 +111,29 @@ export function StaffPOSWorkspace() {
     return getItemsByCategory(activeCategoryId);
   }, [activeCategoryId, getItemsByCategory]);
 
-  // Filtered products based on search query
+  // Derived price tiers when active category is gelato
+  const gelatoPriceTiers = useMemo(() => {
+    if (activeCategoryId !== 'gelato') return [];
+    return derivePriceTiers(categoryProducts);
+  }, [activeCategoryId, categoryProducts]);
+
+  // Filtered products: activeCategory ∩ activeTier ∩ searchQuery (AND)
   const displayedProducts = useMemo(() => {
+    let result = categoryProducts;
+
+    // Apply price-tier filter when active category is gelato
+    if (activeCategoryId === 'gelato' && selectedPriceTier !== 'all') {
+      result = result.filter((p) => p.basePricePaise === selectedPriceTier);
+    }
+
+    // Apply search query filter
     const trimmed = searchQuery.trim().toLowerCase();
-    if (!trimmed) return categoryProducts;
-    return categoryProducts.filter((p) => p.name.toLowerCase().includes(trimmed));
-  }, [categoryProducts, searchQuery]);
+    if (trimmed) {
+      result = result.filter((p) => p.name.toLowerCase().includes(trimmed));
+    }
+
+    return result;
+  }, [categoryProducts, activeCategoryId, selectedPriceTier, searchQuery]);
 
   // New Order Handler
   const handleNewOrder = () => {
@@ -400,6 +419,7 @@ export function StaffPOSWorkspace() {
                         categories={catalogCategories}
                         onSelectCategory={(id) => {
                           setActiveCategoryId(id);
+                          setSelectedPriceTier('all');
                           setSearchQuery('');
                         }}
                       />
@@ -419,6 +439,17 @@ export function StaffPOSWorkspace() {
                         />
                       </div>
 
+                      {/* Gelato Price Tier Chips (Directly below search bar, fixed height, non-scrolling) */}
+                      {activeCategoryId === 'gelato' && (
+                        <div className="shrink-0 mb-2">
+                          <PriceTierChips
+                            tiers={gelatoPriceTiers}
+                            selectedTier={selectedPriceTier}
+                            onSelectTier={setSelectedPriceTier}
+                          />
+                        </div>
+                      )}
+
                         {/* Product Grid Area: INDEPENDENT VERTICAL SCROLLING */}
                         <div className="flex-1 min-h-0 overflow-y-auto pr-1">
                           <ProductGrid
@@ -427,6 +458,7 @@ export function StaffPOSWorkspace() {
                             activeCategoryId={activeCategoryId}
                             searchQuery={searchQuery}
                             onClearSearch={() => setSearchQuery('')}
+                            selectedPriceTier={selectedPriceTier}
                           />
                         </div>
                     </section>

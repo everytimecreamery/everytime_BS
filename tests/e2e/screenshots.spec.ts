@@ -38,7 +38,7 @@ const ARTIFACT_DIR = 'C:/Users/moham/.gemini/antigravity/brain/eed0bbe4-a025-40f
         await expect(page.getByText('Choose your size')).not.toBeVisible();
 
         // Create Order #002: Customer 2 arrives
-        const newOrderBtn = page.getByRole('button', { name: /\+ New Order/i });
+        const newOrderBtn = page.getByRole('button', { name: /New Order/i });
         await newOrderBtn.click();
         await page.waitForTimeout(200);
 

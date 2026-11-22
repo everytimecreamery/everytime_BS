@@ -21,7 +21,7 @@ test.describe('Portal Navigation & Layout Availability', () => {
 
       // Header elements
       await expect(page.getByText('Staff Counter Terminal')).toBeVisible();
-      await expect(page.getByRole('button', { name: /\+ New Order/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /New Order/i })).toBeVisible();
 
       // Three-panel layout elements
       await expect(page.getByRole('region', { name: 'Categories Sidebar' })).toBeVisible();
@@ -57,7 +57,7 @@ test.describe('Portal Navigation & Layout Availability', () => {
         await expect(page.getByRole('button', { name: /Parcel/i })).not.toBeVisible();
 
         // 4. Create Order #001
-        const newOrderBtn = page.getByRole('button', { name: /\+ New Order/i });
+        const newOrderBtn = page.getByRole('button', { name: /New Order/i });
         await newOrderBtn.click();
         await expect(page.getByRole('status', { name: /Active Order #001/i })).toBeVisible();
 

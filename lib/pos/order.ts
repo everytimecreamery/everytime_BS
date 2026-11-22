@@ -23,6 +23,7 @@ import {
   calculateTaxPreviewPaise,
   calculateFinalPayablePaise,
   calculateTaxSplitPaise,
+  calculateOrderFinancialBreakdown,
 } from './calculations';
 import { formatOrderToken, formatTerminalToken, generateUUID } from '@/lib/utils';
 
@@ -67,6 +68,8 @@ export interface PosOrder {
   taxPreviewPaise: number;
   cgstPaise?: number;
   sgstPaise?: number;
+  roundOffPaise?: number;
+  grossPayablePaise?: number;
   totalPaise: number;
   totalPayablePaise: number; // Aliased for cart calculation compatibility
   totalQuantity: number;
@@ -154,6 +157,8 @@ export function recalculateOrderTotals(
   taxPreviewPaise: number;
   cgstPaise: number;
   sgstPaise: number;
+  roundOffPaise: number;
+  grossPayablePaise: number;
   totalPaise: number;
   totalPayablePaise: number;
   totalQuantity: number;
@@ -163,7 +168,7 @@ export function recalculateOrderTotals(
   const discountedSubtotalPaise = Math.max(0, subtotalPaise - discountPaise);
   const taxPreviewPaise = calculateTaxPreviewPaise(discountedSubtotalPaise, taxConfig);
   const { cgstPaise, sgstPaise } = calculateTaxSplitPaise(taxPreviewPaise);
-  const totalPayablePaise = calculateFinalPayablePaise(subtotalPaise, discountPaise, taxPreviewPaise);
+  const breakdown = calculateOrderFinancialBreakdown(subtotalPaise, discountPaise, taxPreviewPaise);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
 
   return {
@@ -172,8 +177,10 @@ export function recalculateOrderTotals(
     taxPreviewPaise,
     cgstPaise,
     sgstPaise,
-    totalPaise: totalPayablePaise,
-    totalPayablePaise,
+    roundOffPaise: breakdown.roundOffPaise,
+    grossPayablePaise: breakdown.grossPayablePaise,
+    totalPaise: breakdown.finalPayablePaise,
+    totalPayablePaise: breakdown.finalPayablePaise,
     totalQuantity,
   };
 }
@@ -196,6 +203,8 @@ export function createNewPosOrder(customToken?: string, timestamp?: string): Pos
     taxPreviewPaise: 0,
     cgstPaise: 0,
     sgstPaise: 0,
+    roundOffPaise: 0,
+    grossPayablePaise: 0,
     totalPaise: 0,
     totalPayablePaise: 0,
     totalQuantity: 0,
@@ -425,6 +434,7 @@ export function completeOrderPayment(
     cgstPaise,
     sgstPaise,
     businessDate,
+    roundOffPaise: order.roundOffPaise ?? 0,
     originalPayment: {
       totalPaise: order.totalPaise,
       method,

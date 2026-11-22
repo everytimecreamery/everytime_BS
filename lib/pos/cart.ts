@@ -15,6 +15,7 @@ import {
   calculateDiscountPaise,
   calculateTaxPreviewPaise,
   calculateFinalPayablePaise,
+  calculateOrderFinancialBreakdown,
 } from './calculations';
 
 export type ServiceType = 'dine_in' | 'parcel';
@@ -43,6 +44,8 @@ export interface POSCartState {
   discountPaise: number;
   discountedSubtotalPaise: number;
   taxPreviewPaise: number;
+  roundOffPaise: number;
+  grossPayablePaise?: number;
   totalPayablePaise: number;
   totalQuantity: number;
 }
@@ -89,6 +92,8 @@ export function createInitialPOSCart(
     discountPaise: 0,
     discountedSubtotalPaise: 0,
     taxPreviewPaise: 0,
+    roundOffPaise: 0,
+    grossPayablePaise: 0,
     totalPayablePaise: 0,
     totalQuantity: 0,
   };
@@ -107,7 +112,7 @@ export function recalculatePOSCart(
   const discountPaise = calculateDiscountPaise(subtotalPaise, discount);
   const discountedSubtotalPaise = Math.max(0, subtotalPaise - discountPaise);
   const taxPreviewPaise = calculateTaxPreviewPaise(discountedSubtotalPaise, taxConfig);
-  const totalPayablePaise = calculateFinalPayablePaise(subtotalPaise, discountPaise, taxPreviewPaise);
+  const breakdown = calculateOrderFinancialBreakdown(subtotalPaise, discountPaise, taxPreviewPaise);
   const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
 
   return {
@@ -119,7 +124,9 @@ export function recalculatePOSCart(
     discountPaise,
     discountedSubtotalPaise,
     taxPreviewPaise,
-    totalPayablePaise,
+    roundOffPaise: breakdown.roundOffPaise,
+    grossPayablePaise: breakdown.grossPayablePaise,
+    totalPayablePaise: breakdown.finalPayablePaise,
     totalQuantity,
   };
 }

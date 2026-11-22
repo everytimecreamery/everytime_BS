@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { PosOrder } from '@/lib/pos/order';
-import { formatPaise } from '@/lib/pos/calculations';
+import { formatPaise, formatSignedRoundOffPaise } from '@/lib/pos/calculations';
 import { calculatePaymentDifference } from '@/lib/pos/orderHistory';
 import {
   CheckCircle2,
@@ -203,6 +203,13 @@ export function OrderReceiptView({ order, onBack, onClose }: OrderReceiptViewPro
           <div className="flex justify-between text-[#777777]">
             <span>Tax preview (5% GST prototype)</span>
             <span className="font-bold text-[#222222] tabular-nums">{formatPaise(order.taxPreviewPaise)}</span>
+          </div>
+
+          <div className="flex justify-between text-[#777777]">
+            <span>Round Off</span>
+            <span className="font-bold text-[#222222] tabular-nums">
+              {formatSignedRoundOffPaise(order.roundOffPaise ?? 0)}
+            </span>
           </div>
 
           <div className="pt-2 border-t border-[#E8E3C3] flex justify-between items-baseline">

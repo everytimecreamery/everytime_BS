@@ -9,6 +9,7 @@
 import { supabase } from '@/lib/supabase/client';
 import { PosOrder, PaymentMethod } from '@/lib/pos/order';
 import { generateUUID } from '@/lib/utils';
+import { getStoreBusinessDate, SalesDateRangeType } from '@/lib/pos/dateRange';
 
 export interface PushOrderResult {
   success: boolean;
@@ -17,8 +18,86 @@ export interface PushOrderResult {
 }
 
 /**
+ * Maps a raw Supabase order record (with joined order_items and payments)
+ * to the strong PosOrder application interface.
+ */
+export function mapSupabaseOrderToPosOrder(rec: any): PosOrder {
+  const tokenLabel = rec.token_terminal
+    ? `${rec.token_terminal}-${rec.token_seq.toString().padStart(3, '0')}`
+    : `#${rec.token_seq?.toString().padStart(3, '0') || '000'}`;
+
+  const paymentMethod =
+    (rec.payments?.[0]?.method?.toUpperCase() as any) ||
+    (rec.payment_method?.toUpperCase() as any) ||
+    'CASH';
+
+  return {
+    id: rec.id,
+    token: tokenLabel,
+    status: (rec.status as any) || 'COMPLETED',
+    items: (rec.order_items || []).map((it: any) => ({
+      lineId: it.id,
+      productId: it.menu_item_id || it.id,
+      productName: it.product_name,
+      variantId: it.variant_label || undefined,
+      variantLabel: it.variant_label || undefined,
+      addOnId: it.addon_label || undefined,
+      addOnLabel: it.addon_label || undefined,
+      unitPricePaise: it.unit_price_paise,
+      quantity: it.quantity,
+      lineTotalPaise: it.total_price_paise,
+      totalPricePaise: it.total_price_paise,
+    })),
+    subtotalPaise: rec.subtotal_paise || 0,
+    discountPaise: rec.discount_paise || 0,
+    taxPreviewPaise: rec.tax_paise || 0,
+    cgstPaise: rec.cgst_paise ?? Math.round((rec.tax_paise || 0) / 2),
+    sgstPaise: rec.sgst_paise ?? ((rec.tax_paise || 0) - Math.round((rec.tax_paise || 0) / 2)),
+    roundOffPaise: rec.round_off_paise ?? 0,
+    totalPaise: rec.total_paise || 0,
+    totalPayablePaise: rec.total_paise || 0,
+    totalQuantity: (rec.order_items || []).reduce((sum: number, item: any) => sum + (item.quantity || 0), 0),
+    discount: {
+      type: (rec.discount_type?.toLowerCase() as any) || 'none',
+      percent:
+        rec.discount_type === 'PERCENTAGE'
+          ? Math.round(((rec.discount_paise || 0) / (rec.subtotal_paise || 1)) * 100)
+          : 0,
+    },
+    taxConfig: { ratePercent: 5, isProvisional: true },
+    paymentStatus: 'PAID',
+    paymentMethod,
+    createdAt: rec.client_completed_at || rec.created_at,
+    updatedAt: rec.client_completed_at || rec.created_at,
+    completedAt: rec.client_completed_at || rec.created_at,
+    businessDate: rec.business_date,
+  };
+}
+
+/**
+ * Updates terminal last_synced_at timestamp on successful worker sync/ack.
+ */
+export async function updateTerminalSyncTime(
+  terminalId: string = '00000000-0000-0000-0000-000000000002'
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('terminals')
+      .update({ last_synced_at: new Date().toISOString() })
+      .eq('id', terminalId);
+
+    if (error) {
+      console.warn('[updateTerminalSyncTime] Failed to update terminal sync time:', error);
+    }
+  } catch (err) {
+    console.warn('[updateTerminalSyncTime] Exception:', err);
+  }
+}
+
+/**
  * Directly pushes a completed POS order to Supabase database.
  * Inserts order record, line items, and payment tender.
+ * Updates terminal sync timestamp upon successful ack.
  */
 export async function pushOrderToDatabase(
   order: PosOrder,
@@ -36,7 +115,8 @@ export async function pushOrderToDatabase(
     const cgstPaise = order.cgstPaise ?? Math.round(taxPaise / 2);
     const sgstPaise = order.sgstPaise ?? (taxPaise - cgstPaise);
     const completedAt = order.completedAt || new Date().toISOString();
-    const businessDate = order.businessDate || new Date().toISOString().split('T')[0];
+    // Resolve store-timezone business date with 04:00 AM cutoff applied at write time
+    const businessDate = order.businessDate || getStoreBusinessDate(completedAt);
 
     // 1. Insert order record into public.orders
     const { error: orderError } = await supabase.from('orders').upsert(
@@ -56,6 +136,7 @@ export async function pushOrderToDatabase(
         tax_paise: taxPaise,
         cgst_paise: cgstPaise,
         sgst_paise: sgstPaise,
+        round_off_paise: order.roundOffPaise ?? 0,
         total_paise: order.totalPaise,
         client_completed_at: completedAt,
         business_date: businessDate,
@@ -110,10 +191,100 @@ export async function pushOrderToDatabase(
       console.error('[pushOrderToDatabase] Payment error:', paymentError);
     }
 
+    // 4. Update terminal last_synced_at timestamp on successful sync ack
+    await updateTerminalSyncTime('00000000-0000-0000-0000-000000000002');
+
     return { success: true, orderId: order.id };
   } catch (err: any) {
     console.error('[pushOrderToDatabase] Unexpected exception:', err);
     return { success: false, error: err?.message || 'Failed to push order to database' };
+  }
+}
+
+/**
+ * Server-side query for the Owner Sales View.
+ * Queries orders with .eq / .gte / .lte on business_date,
+ * joins order_items and payments, and recomputes exact tender splits.
+ * Never fetches all orders to filter in client memory.
+ */
+export async function fetchSalesLedger(filter: {
+  type: SalesDateRangeType;
+  from?: string;
+  to?: string;
+}): Promise<{
+  orders: any[];
+  grossPaise: number;
+  cashPaise: number;
+  upiPaise: number;
+  cardPaise: number;
+}> {
+  try {
+    let query = supabase
+      .from('orders')
+      .select('*, order_items(*), payments(*)')
+      .eq('status', 'COMPLETED')
+      .order('client_completed_at', { ascending: false });
+
+    if (filter.type === 'today' || filter.type === 'yesterday') {
+      if (filter.from) {
+        query = query.eq('business_date', filter.from);
+      }
+    } else if (filter.type === 'week' || filter.type === 'month' || filter.type === 'custom') {
+      if (filter.from && filter.to) {
+        if (filter.from === filter.to) {
+          query = query.eq('business_date', filter.from);
+        } else {
+          query = query.gte('business_date', filter.from).lte('business_date', filter.to);
+        }
+      }
+    }
+    // If 'all', do not add business_date constraint
+
+    const { data, error } = await query;
+    if (error || !data) {
+      console.warn('[fetchSalesLedger] Query error:', error);
+      return { orders: [], grossPaise: 0, cashPaise: 0, upiPaise: 0, cardPaise: 0 };
+    }
+
+    let grossPaise = 0;
+    let cashPaise = 0;
+    let upiPaise = 0;
+    let cardPaise = 0;
+
+    for (const order of data) {
+      const orderTotal = order.total_paise || 0;
+      grossPaise += orderTotal;
+
+      const pays = order.payments || [];
+      if (pays.length > 0) {
+        for (const p of pays) {
+          const m = (p.method || '').toLowerCase();
+          const amt = p.amount_paise || 0;
+          if (m === 'cash') cashPaise += amt;
+          else if (m === 'upi') upiPaise += amt;
+          else if (m === 'card') cardPaise += amt;
+          else cashPaise += amt;
+        }
+      } else {
+        // Fallback to order's top-level tender
+        const m = (order.payment_method || '').toLowerCase();
+        if (m === 'cash') cashPaise += orderTotal;
+        else if (m === 'upi') upiPaise += orderTotal;
+        else if (m === 'card') cardPaise += orderTotal;
+        else cashPaise += orderTotal;
+      }
+    }
+
+    return {
+      orders: data,
+      grossPaise,
+      cashPaise,
+      upiPaise,
+      cardPaise,
+    };
+  } catch (err) {
+    console.warn('[fetchSalesLedger] Exception:', err);
+    return { orders: [], grossPaise: 0, cashPaise: 0, upiPaise: 0, cardPaise: 0 };
   }
 }
 
@@ -140,48 +311,7 @@ export async function fetchOrdersFromDatabase(): Promise<PosOrder[]> {
       return [];
     }
 
-    return data.map((rec: any) => ({
-      id: rec.id,
-      token: rec.token_terminal
-        ? `${rec.token_terminal}-${rec.token_seq.toString().padStart(3, '0')}`
-        : `#${rec.token_seq.toString().padStart(3, '0')}`,
-      status: 'COMPLETED',
-      items: (rec.order_items || []).map((it: any) => ({
-        lineId: it.id,
-        productId: it.menu_item_id || it.id,
-        productName: it.product_name,
-        variantId: it.variant_label || undefined,
-        variantLabel: it.variant_label || undefined,
-        addOnId: it.addon_label || undefined,
-        addOnLabel: it.addon_label || undefined,
-        unitPricePaise: it.unit_price_paise,
-        quantity: it.quantity,
-        lineTotalPaise: it.total_price_paise,
-        totalPricePaise: it.total_price_paise,
-      })),
-      subtotalPaise: rec.subtotal_paise,
-      discountPaise: rec.discount_paise,
-      taxPreviewPaise: rec.tax_paise,
-      cgstPaise: rec.cgst_paise,
-      sgstPaise: rec.sgst_paise,
-      totalPaise: rec.total_paise,
-      totalPayablePaise: rec.total_paise,
-      totalQuantity: (rec.order_items || []).reduce((sum: number, item: any) => sum + item.quantity, 0),
-      discount: {
-        type: (rec.discount_type?.toLowerCase() as any) || 'none',
-        percent:
-          rec.discount_type === 'PERCENTAGE'
-            ? Math.round((rec.discount_paise / (rec.subtotal_paise || 1)) * 100)
-            : 0,
-      },
-      taxConfig: { ratePercent: 5, isProvisional: true },
-      paymentStatus: 'PAID',
-      paymentMethod: (rec.payments?.[0]?.method?.toUpperCase() as any) || 'CASH',
-      createdAt: rec.client_completed_at,
-      updatedAt: rec.client_completed_at,
-      completedAt: rec.client_completed_at,
-      businessDate: rec.business_date,
-    }));
+    return data.map(mapSupabaseOrderToPosOrder);
   } catch (err) {
     console.warn('[fetchOrdersFromDatabase] Exception:', err);
     return [];
@@ -200,6 +330,7 @@ export async function updateOrderInDatabase(
     discount_reason?: string | null;
     subtotal_paise?: number;
     tax_paise?: number;
+    round_off_paise?: number;
     total_paise?: number;
     payment_method?: 'cash' | 'upi' | 'card';
   }
@@ -215,6 +346,7 @@ export async function updateOrderInDatabase(
       orderFields.cgst_paise = Math.round(updates.tax_paise / 2);
       orderFields.sgst_paise = updates.tax_paise - orderFields.cgst_paise;
     }
+    if (updates.round_off_paise !== undefined) orderFields.round_off_paise = updates.round_off_paise;
     if (updates.total_paise !== undefined) orderFields.total_paise = updates.total_paise;
 
     if (Object.keys(orderFields).length > 0) {

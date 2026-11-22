@@ -69,8 +69,12 @@ export function loadOrderHistory(): PosOrder[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      memoryHistoryStore = parsed;
-      return parsed;
+      const sanitized = parsed.map((order: PosOrder) => ({
+        ...order,
+        roundOffPaise: order.roundOffPaise ?? 0,
+      }));
+      memoryHistoryStore = sanitized;
+      return sanitized;
     }
   } catch (err) {
     console.warn('Failed to parse order history from localStorage:', err);

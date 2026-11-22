@@ -20,7 +20,7 @@ describe('Staff POS Order History Feature Tests', () => {
   it('1. Order History button appears in header next to + New Order without count badge', () => {
     render(<StaffPOSWorkspace />);
 
-    const newOrderBtn = screen.getByRole('button', { name: /\+ New Order/i });
+    const newOrderBtn = screen.getByRole('button', { name: /New Order/i });
     const historyBtn = screen.getByRole('button', { name: /Order History/i });
 
     expect(newOrderBtn).toBeInTheDocument();

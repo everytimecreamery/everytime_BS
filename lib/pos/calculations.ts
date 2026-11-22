@@ -108,18 +108,86 @@ export function calculateTaxPreviewPaise(
 }
 
 /**
- * Calculates the final payable amount in paise.
+ * Calculates integer-only round-off in paise to round the final payable
+ * to the nearest whole rupee, half-up.
+ * r = grossPayablePaise % 100
+ * roundOffPaise = r >= 50 ? 100 - r : -r
+ * Examples:
+ *   10395 -> +5 (10400)
+ *   10349 -> -49 (10300)
+ *   10350 -> +50 (10400)
+ *   10000 -> 0 (10000)
+ *       0 -> 0 (0)
+ */
+export function calculateRoundOffPaise(grossPayablePaise: number): number {
+  if (!Number.isFinite(grossPayablePaise) || grossPayablePaise <= 0) return 0;
+  const safeGross = Math.max(0, Math.round(grossPayablePaise));
+  const r = safeGross % 100;
+  if (r === 0) return 0;
+  return r >= 50 ? 100 - r : -r;
+}
+
+export interface FinancialBreakdown {
+  subtotalPaise: number;
+  discountPaise: number;
+  taxableSubtotalPaise: number;
+  taxPreviewPaise: number;
+  grossPayablePaise: number;
+  roundOffPaise: number;
+  finalPayablePaise: number;
+}
+
+/**
+ * Calculates complete order financial breakdown with integer-only round-off.
+ * Round ONLY the final payable. Never round line items, subtotal, discount, or tax.
+ */
+export function calculateOrderFinancialBreakdown(
+  subtotalPaise: number,
+  discountPaise: number,
+  taxPreviewPaise: number
+): FinancialBreakdown {
+  const safeSubtotal = Math.max(0, Math.round(subtotalPaise));
+  const safeDiscount = Math.min(safeSubtotal, Math.max(0, Math.round(discountPaise)));
+  const taxableSubtotalPaise = Math.max(0, safeSubtotal - safeDiscount);
+  const safeTax = Math.max(0, Math.round(taxPreviewPaise));
+  const grossPayablePaise = taxableSubtotalPaise + safeTax;
+
+  if (grossPayablePaise === 0) {
+    return {
+      subtotalPaise: safeSubtotal,
+      discountPaise: safeDiscount,
+      taxableSubtotalPaise,
+      taxPreviewPaise: safeTax,
+      grossPayablePaise: 0,
+      roundOffPaise: 0,
+      finalPayablePaise: 0,
+    };
+  }
+
+  const roundOffPaise = calculateRoundOffPaise(grossPayablePaise);
+  const finalPayablePaise = grossPayablePaise + roundOffPaise;
+
+  return {
+    subtotalPaise: safeSubtotal,
+    discountPaise: safeDiscount,
+    taxableSubtotalPaise,
+    taxPreviewPaise: safeTax,
+    grossPayablePaise,
+    roundOffPaise,
+    finalPayablePaise,
+  };
+}
+
+/**
+ * Calculates the final payable amount in paise with rupee round-half-up applied.
  */
 export function calculateFinalPayablePaise(
   subtotalPaise: number,
   discountPaise: number,
   taxPaise: number
 ): number {
-  const safeSubtotal = Math.max(0, subtotalPaise);
-  const safeDiscount = Math.min(safeSubtotal, Math.max(0, discountPaise));
-  const safeTax = Math.max(0, taxPaise);
-
-  return safeSubtotal - safeDiscount + safeTax;
+  const breakdown = calculateOrderFinancialBreakdown(subtotalPaise, discountPaise, taxPaise);
+  return breakdown.finalPayablePaise;
 }
 
 /**
@@ -179,4 +247,39 @@ export function paiseToRupees(paise: number): number {
 export function rupeesToPaise(rupees: number): number {
   return Math.round(rupees * 100);
 }
+
+/**
+ * Formats signed round-off paise for UI presentation:
+ * +₹0.05, -₹0.49, or ₹0.00.
+ */
+export function formatSignedRoundOffPaise(roundOffPaise: number): string {
+  if (!Number.isFinite(roundOffPaise) || roundOffPaise === 0) {
+    return '₹0.00';
+  }
+  const absFormatted = formatPaise(Math.abs(roundOffPaise), true);
+  return roundOffPaise > 0 ? `+${absFormatted}` : `-${absFormatted}`;
+}
+
+/**
+ * Generates standard UPI QR Intent URI with exact rounded rupees in am= parameter.
+ * e.g., upi://pay?pa=...&pn=...&am=104.00&cu=INR
+ */
+export function generateUpiQrString(
+  vpa: string,
+  payeeName: string,
+  amountPaise: number,
+  orderToken?: string
+): string {
+  const roundedRupees = (Math.max(0, amountPaise) / 100).toFixed(2);
+  const params = new URLSearchParams();
+  params.set('pa', vpa);
+  params.set('pn', payeeName);
+  params.set('am', roundedRupees);
+  params.set('cu', 'INR');
+  if (orderToken) {
+    params.set('tn', `Order ${orderToken}`);
+  }
+  return `upi://pay?${params.toString()}`;
+}
+
 

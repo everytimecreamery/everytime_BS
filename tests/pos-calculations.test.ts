@@ -6,8 +6,12 @@ import {
   calculateDiscountPaise,
   calculateTaxPreviewPaise,
   calculateFinalPayablePaise,
+  calculateRoundOffPaise,
+  calculateOrderFinancialBreakdown,
   calculateCashChangePaise,
   formatPaise,
+  formatSignedRoundOffPaise,
+  generateUpiQrString,
   paiseToRupees,
   rupeesToPaise,
   DEFAULT_TAX_CONFIG,
@@ -100,12 +104,14 @@ describe('Staff POS Calculations Unit Tests (Phase 1)', () => {
       expect(calculateTaxPreviewPaise(10000, customTax)).toBe(1200);
     });
 
-    it('calculates final payable correctly: (Subtotal - Discount) + Tax', () => {
+    it('calculates final payable correctly with rupee round-half-up applied', () => {
       const subtotal = 33800;  // ₹338.00
       const discount = 3380;   // ₹33.80 (10%)
       const tax = 1521;        // ₹15.21 (5% of 30420)
-      // Final: 33800 - 3380 + 1521 = 31941 paise
-      expect(calculateFinalPayablePaise(subtotal, discount, tax)).toBe(31941);
+      // Gross: 33800 - 3380 + 1521 = 31941 paise
+      // Round-off: 31941 % 100 = 41 < 50 => -41 paise
+      // Final rounded: 31900 paise (₹319.00)
+      expect(calculateFinalPayablePaise(subtotal, discount, tax)).toBe(31900);
     });
 
     it('prevents negative final payable if discount exceeds subtotal', () => {
@@ -113,11 +119,76 @@ describe('Staff POS Calculations Unit Tests (Phase 1)', () => {
     });
   });
 
-  describe('Cash Change Calculations', () => {
+  describe('Rupee Round-Off (Round-Half-Up, Integer-Only)', () => {
+    it('rounds 10395 -> 10400 with roundOff +5', () => {
+      const gross = 10395; // ₹103.95 (₹99 + 5% GST ₹4.95)
+      const roundOff = calculateRoundOffPaise(gross);
+      expect(roundOff).toBe(5);
+      expect(gross + roundOff).toBe(10400);
+    });
+
+    it('rounds 10349 -> 10300 with -49', () => {
+      const gross = 10349; // ₹103.49
+      const roundOff = calculateRoundOffPaise(gross);
+      expect(roundOff).toBe(-49);
+      expect(gross + roundOff).toBe(10300);
+    });
+
+    it('rounds 10350 -> 10400 (half-up) with +50', () => {
+      const gross = 10350; // ₹103.50
+      const roundOff = calculateRoundOffPaise(gross);
+      expect(roundOff).toBe(50);
+      expect(gross + roundOff).toBe(10400);
+    });
+
+    it('leaves exact rupees unadjusted: 10000 -> 10000 with 0', () => {
+      const gross = 10000; // ₹100.00
+      const roundOff = calculateRoundOffPaise(gross);
+      expect(roundOff).toBe(0);
+      expect(gross + roundOff).toBe(10000);
+    });
+
+    it('handles zero taxable / empty orders safely: 0 -> 0 with round-off 0', () => {
+      expect(calculateRoundOffPaise(0)).toBe(0);
+      expect(calculateRoundOffPaise(-500)).toBe(0);
+
+      const emptyBreakdown = calculateOrderFinancialBreakdown(0, 0, 0);
+      expect(emptyBreakdown.grossPayablePaise).toBe(0);
+      expect(emptyBreakdown.roundOffPaise).toBe(0);
+      expect(emptyBreakdown.finalPayablePaise).toBe(0);
+    });
+
+    it('rounds ONLY final payable: never rounds line items, subtotal, discount, or tax', () => {
+      // Scoop price ₹99 (9900 paise), 5% GST = 495 paise (₹4.95)
+      const breakdown = calculateOrderFinancialBreakdown(9900, 0, 495);
+      expect(breakdown.subtotalPaise).toBe(9900); // Unrounded
+      expect(breakdown.discountPaise).toBe(0);
+      expect(breakdown.taxPreviewPaise).toBe(495); // Unrounded tax: tax liability unaffected
+      expect(breakdown.grossPayablePaise).toBe(10395); // Unrounded gross
+      expect(breakdown.roundOffPaise).toBe(5); // +₹0.05 adjustment
+      expect(breakdown.finalPayablePaise).toBe(10400); // Only final payable rounded to ₹104.00
+    });
+
+    it('formats signed round-off for UI presentation correctly', () => {
+      expect(formatSignedRoundOffPaise(5)).toMatch(/\+₹\s?0\.05/);
+      expect(formatSignedRoundOffPaise(-49)).toMatch(/-₹\s?0\.49/);
+      expect(formatSignedRoundOffPaise(0)).toBe('₹0.00');
+    });
+  });
+
+  describe('Cash Change Calculations with Rounded Total', () => {
     it('calculates change due when tendered amount is greater than payable', () => {
       const payable = 33800;  // ₹338.00
       const tendered = 50000; // ₹500.00
       expect(calculateCashChangePaise(tendered, payable)).toBe(16200); // ₹162.00
+    });
+
+    it('calculates cash change using the rounded final payable', () => {
+      // ₹99 scoop + 5% GST = ₹103.95 gross -> ₹104 rounded (10400 paise)
+      const roundedPayable = 10400;
+      const tendered = 50000; // ₹500 note
+      // 50000 - 10400 = 39600 paise (₹396.00 change)
+      expect(calculateCashChangePaise(tendered, roundedPayable)).toBe(39600);
     });
 
     it('returns zero change when exact amount is tendered', () => {
@@ -126,6 +197,29 @@ describe('Staff POS Calculations Unit Tests (Phase 1)', () => {
 
     it('returns zero change when tendered amount is less than payable', () => {
       expect(calculateCashChangePaise(20000, 33800)).toBe(0);
+    });
+  });
+
+  describe('UPI QR String Generator', () => {
+    it('generates standard UPI intent with exact rounded rupees in am= parameter', () => {
+      const qrUrl = generateUpiQrString(
+        'everytimecreamery@okhdfcbank',
+        'Everytime Creamery',
+        10400,
+        '#001'
+      );
+      expect(qrUrl).toContain('upi://pay?');
+      expect(qrUrl).toContain('pa=everytimecreamery%40okhdfcbank');
+      expect(qrUrl).toContain('pn=Everytime+Creamery');
+      expect(qrUrl).toContain('am=104.00');
+      expect(qrUrl).toContain('cu=INR');
+      expect(qrUrl).toContain('tn=Order+%23001');
+    });
+
+    it('handles zero or unpadded token cleanly', () => {
+      const qrUrl = generateUpiQrString('merchant@upi', 'Creamery', 0);
+      expect(qrUrl).toContain('am=0.00');
+      expect(qrUrl).toContain('cu=INR');
     });
   });
 

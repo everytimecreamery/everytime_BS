@@ -81,11 +81,11 @@ export function PosHeader({
                 <button
                   type="button"
                   onClick={onNewOrder}
-                  aria-label="+ New Order"
+                  aria-label="New Order"
                   className="h-9 px-3.5 rounded-xl bg-[#C43C1E] hover:bg-[#AB3419] text-white text-xs font-black tracking-wide flex items-center gap-1.5 transition-all shadow-xs cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C43C1E] active:scale-95 shrink-0"
                 >
                   <Plus className="w-4 h-4 stroke-[3]" />
-                  <span>+ New Order</span>
+                  <span>New Order</span>
                 </button>
 
                 <button

@@ -254,6 +254,7 @@ export interface Database {
           tax_paise: number;
           cgst_paise: number;
           sgst_paise: number;
+          round_off_paise: number;
           total_paise: number;
           client_completed_at: string;
           server_received_at: string;
@@ -276,6 +277,7 @@ export interface Database {
           tax_paise?: number;
           cgst_paise?: number;
           sgst_paise?: number;
+          round_off_paise?: number;
           total_paise: number;
           client_completed_at: string;
           server_received_at?: string;
@@ -298,6 +300,7 @@ export interface Database {
           tax_paise?: number;
           cgst_paise?: number;
           sgst_paise?: number;
+          round_off_paise?: number;
           total_paise?: number;
           client_completed_at?: string;
           server_received_at?: string;

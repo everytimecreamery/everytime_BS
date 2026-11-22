@@ -104,8 +104,9 @@ import {
 
       expect(order.items).toHaveLength(1);
       expect(order.subtotalPaise).toBe(16900);
-      expect(order.taxPreviewPaise).toBe(845); // 5% GST of 16900 = 845
-      expect(order.totalPaise).toBe(17745); // 16900 + 845
+      expect(order.taxPreviewPaise).toBe(845); // 5% GST of 16900 = 845 (unrounded)
+      expect(order.roundOffPaise).toBe(-45); // 17745 % 100 = 45 < 50 => -45
+      expect(order.totalPaise).toBe(17700); // 17745 - 45 = 17700 rounded to nearest rupee
 
       // Add another identical item -> merges line
       order = addItemToOrder(order, {

@@ -7,6 +7,8 @@ import {
   calculateCashChangePaise,
   rupeesToPaise,
   paiseToRupees,
+  formatSignedRoundOffPaise,
+  generateUpiQrString,
 } from '@/lib/pos/calculations';
 import {
   CreditCard,
@@ -151,13 +153,19 @@ function PaymentPreviewModal({
                               </div>
                             )
                           }
-                          < div className="flex justify-between">
-                        <span>Tax preview (5% GST prototype)</span>
-                        <span className="font-semibold text-[#222222] tabular-nums">
-                          {formatPaise(order.taxPreviewPaise)}
-                        </span>
-                      </div>
-                      <div className="pt-2 border-t border-[#E8E3C3] flex justify-between items-baseline text-base font-extrabold text-[#222222]">
+                          <div className="flex justify-between">
+                            <span>Tax preview (5% GST prototype)</span>
+                            <span className="font-semibold text-[#222222] tabular-nums">
+                              {formatPaise(order.taxPreviewPaise)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Round Off</span>
+                            <span className="font-semibold text-[#222222] tabular-nums">
+                              {formatSignedRoundOffPaise(order.roundOffPaise ?? 0)}
+                            </span>
+                          </div>
+                          <div className="pt-2 border-t border-[#E8E3C3] flex justify-between items-baseline text-base font-extrabold text-[#222222]">
                         <span>Final Payable</span>
                         <span className="text-xl text-[#C43C1E] tabular-nums">
                           {formatPaise(order.totalPaise)}
@@ -253,15 +261,37 @@ function PaymentPreviewModal({
                       </div>
                     )}
 
-                    {/* UPI / Card notice */}
-                        {selectedMethod !== 'CASH' && (
-                          <div className="p-2.5 bg-[#FAF8E8] rounded-xl border border-[#E8E3C3] mb-3.5 text-xs text-[#777777] flex items-center gap-2">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>
-                              Selected Mode: <strong>{selectedMethod}</strong>. Confirm below after verifying customer payment.
-                            </span>
-                          </div>
-                        )}
+                    {/* UPI QR & Intent preview */}
+                    {selectedMethod === 'UPI' && (
+                      <div className="p-3 bg-[#FAF8E8] rounded-xl border border-[#E8E3C3] mb-3.5 space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-[#222222] flex items-center gap-1.5">
+                            <QrCode className="w-4 h-4 text-[#C43C1E]" />
+                            UPI Dynamic Intent / QR
+                          </span>
+                          <span className="font-extrabold text-[#C43C1E] tabular-nums">
+                            {formatPaise(totalPaise)}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#777777] font-mono break-all bg-white p-2 rounded-lg border border-[#E8E3C3]">
+                          {generateUpiQrString('everytimecreamery@okhdfcbank', 'Everytime Creamery', totalPaise, order.token)}
+                        </div>
+                        <div className="text-[10.5px] text-[#777777] flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Selected Mode: <strong>UPI</strong>. Amount: <strong>{formatPaise(totalPaise)}</strong> (am={(totalPaise / 100).toFixed(2)}). Confirm below after verifying customer payment.</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Card notice */}
+                    {selectedMethod === 'CARD' && (
+                      <div className="p-2.5 bg-[#FAF8E8] rounded-xl border border-[#E8E3C3] mb-3.5 text-xs text-[#777777] flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>
+                          Selected Mode: <strong>CARD</strong>. Card capture amount: <strong className="text-[#222222]">{formatPaise(totalPaise)}</strong>. Swipe/tap on EDC terminal and confirm below.
+                        </span>
+                      </div>
+                    )}
 
                           {/* Action Buttons: Cancel or Explicit Payment Confirmation */}
                           <div className="flex items-center gap-2.5">

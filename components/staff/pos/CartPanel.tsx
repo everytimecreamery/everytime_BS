@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { PosOrder } from '@/lib/pos/order';
-import { formatPaise } from '@/lib/pos/calculations';
+import { formatPaise, formatSignedRoundOffPaise } from '@/lib/pos/calculations';
 import { CartItem } from './CartItem';
 import {
   ShoppingBag,
@@ -214,6 +214,14 @@ export function CartPanel({
                         <span>Tax preview (5% GST prototype)</span>
                         <span className="font-semibold text-[#222222] tabular-nums">
                           {formatPaise(order.taxPreviewPaise)}
+                        </span>
+                      </div>
+
+                      {/* Round Off */}
+                      <div className="flex justify-between text-xs text-[#777777]">
+                        <span>Round Off</span>
+                        <span className="font-semibold text-[#222222] tabular-nums">
+                          {formatSignedRoundOffPaise(order.roundOffPaise ?? 0)}
                         </span>
                       </div>
 

@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { formatPaise, paiseToRupees, rupeesToPaise } from '@/lib/pos/calculations';
+import {
+  formatPaise,
+  paiseToRupees,
+  rupeesToPaise,
+  formatSignedRoundOffPaise,
+  calculateOrderFinancialBreakdown,
+} from '@/lib/pos/calculations';
 import { updateOrderInDatabase, deleteOrderFromDatabase } from '@/lib/supabase/orders';
 import {
   X,
@@ -67,7 +73,9 @@ export function OwnerOrderEditModal({
   const discountedSubtotalPaise = Math.max(0, subtotalPaise - newDiscountPaise);
   // Standard 5% GST on ice cream / bakery
   const newTaxPaise = Math.round(discountedSubtotalPaise * 0.05);
-  const newTotalPaise = discountedSubtotalPaise + newTaxPaise;
+  const breakdown = calculateOrderFinancialBreakdown(subtotalPaise, newDiscountPaise, newTaxPaise);
+  const newRoundOffPaise = breakdown.roundOffPaise;
+  const newTotalPaise = breakdown.finalPayablePaise;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,6 +88,7 @@ export function OwnerOrderEditModal({
         discount_paise: newDiscountPaise,
         discount_reason: discountReason || undefined,
         tax_paise: newTaxPaise,
+        round_off_paise: newRoundOffPaise,
         total_paise: newTotalPaise,
         payment_method: paymentMethod,
       });
@@ -238,6 +247,10 @@ export function OwnerOrderEditModal({
             <div className="flex justify-between text-[#777777]">
               <span>GST Tax (5%):</span>
               <span className="tabular-nums font-semibold">+{formatPaise(newTaxPaise)}</span>
+            </div>
+            <div className="flex justify-between text-[#777777]">
+              <span>Round Off:</span>
+              <span className="tabular-nums font-semibold">{formatSignedRoundOffPaise(newRoundOffPaise)}</span>
             </div>
             <div className="pt-1.5 border-t border-zinc-200 flex justify-between font-black text-sm text-[#222222]">
               <span>Updated Total Payable:</span>

@@ -302,7 +302,7 @@ import { resetSessionTokenCounter } from '@/lib/pos/order';
 
           // Initial order is #001 (empty)
           expect(screen.getAllByText(/#001/).length).toBeGreaterThanOrEqual(1);
-          const newOrderBtn = screen.getByRole('button', { name: /\+ New Order/i });
+          const newOrderBtn = screen.getByRole('button', { name: /New Order/i });
 
           // Clicking New Order on empty order does not duplicate empty orders
           fireEvent.click(newOrderBtn);
@@ -355,7 +355,7 @@ import { resetSessionTokenCounter } from '@/lib/pos/order';
           fireEvent.click(screen.getByRole('article', { name: /Classic Vanilla/i }));
 
           const cart = screen.getByLabelText('Order Cart');
-          const newOrderBtn = screen.getByRole('button', { name: /\+ New Order/i });
+          const newOrderBtn = screen.getByRole('button', { name: /New Order/i });
 
           // Create Order #002: Add Nutella Bliss
           fireEvent.click(newOrderBtn);
