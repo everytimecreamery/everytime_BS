@@ -11,7 +11,6 @@ interface ProductGridProps {
   activeCategoryId?: CategoryId;
   searchQuery?: string;
   onClearSearch?: () => void;
-  selectedPriceTier?: number | 'all';
 }
 
 export function ProductGrid({
@@ -20,7 +19,6 @@ export function ProductGrid({
   activeCategoryId,
   searchQuery,
   onClearSearch,
-  selectedPriceTier,
 }: ProductGridProps) {
   if (items.length === 0) {
     return (
@@ -32,8 +30,6 @@ export function ProductGrid({
         <p className="text-xs text-[#777777] mt-1.5 max-w-xs leading-relaxed">
           {searchQuery
             ? `No products match "${searchQuery}". Check the spelling or search another flavor.`
-            : selectedPriceTier && selectedPriceTier !== 'all'
-            ? 'No products match the selected price tier.'
             : 'No products are currently available in this category.'}
         </p>
 
