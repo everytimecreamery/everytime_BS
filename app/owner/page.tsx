@@ -1,37 +1,58 @@
-'use client';
+import React, { Suspense } from 'react';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { createClient } from '@/utils/supabase/server';
+import { OwnerPortalClient } from '@/components/owner/OwnerPortalClient';
 
-import React, { useState } from 'react';
-import { OwnerSidebar } from '@/components/owner/OwnerSidebar';
-import { OwnerHeader } from '@/components/owner/OwnerHeader';
-import { OwnerSectionView } from '@/components/owner/OwnerSectionView';
-import { OWNER_NAV_ITEMS } from '@/lib/constants';
+export const metadata = {
+  title: 'Owner Portal — Everytime Creamery',
+  description: 'Operations management, sales analytics, and configuration for Everytime Creamery',
+};
 
-export default function OwnerPage() {
-  const [currentSection, setCurrentSection] = useState<string>('dashboard');
+async function OwnerPortalContent() {
+  const cookieStore = await cookies();
+  const supabase = createClient(cookieStore);
 
-  const activeItem =
-    OWNER_NAV_ITEMS.find((item) => item.id === currentSection) || OWNER_NAV_ITEMS[0];
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect('/owner/login');
+  }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, role, full_name, store_id')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (!profile || profile.role !== 'owner') {
+    redirect('/owner/login?error=unauthorized');
+  }
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen">
-      {/* Sidebar Navigation */}
-      <OwnerSidebar
-        currentSection={currentSection}
-        onSelectSection={(sectionId) => setCurrentSection(sectionId)}
-      />
-
-      {/* Main Back Office Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <OwnerHeader
-          title={activeItem.label}
-          description={activeItem.description}
-        />
-
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-          <OwnerSectionView sectionId={currentSection} />
-        </main>
-      </div>
-    </div>
+    <OwnerPortalClient
+      user={{ id: user.id, email: user.email }}
+      profile={profile}
+    />
   );
 }
 
+/**
+ * Server Component: Owner Portal Entry.
+ * Wrapped in Suspense to support Next.js Cache Components and Partial Prerendering.
+ */
+export default function OwnerPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#F9F7DC] flex items-center justify-center text-xs text-[#777777]">
+          Verifying Owner Authorization...
+        </div>
+      }
+    >
+      <OwnerPortalContent />
+    </Suspense>
+  );
+}
