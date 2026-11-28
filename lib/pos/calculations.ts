@@ -6,14 +6,14 @@
  * - All calculations strictly executed in INTEGER PAISE (1 INR = 100 paise).
  * - Floating point numbers are forbidden for monetary totals.
  * - Tax preview is configurable and explicitly identified as a prototype preview.
- * - Discounts are validated strictly between 0% and 100%.
+ * - Discounts are validated strictly between 0% and less than 100%.
  */
 
 export type DiscountType = 'none' | 'percent_5' | 'percent_10' | 'custom';
 
 export interface DiscountConfig {
   type: DiscountType;
-  /** Percentage value (0 - 100) */
+  /** Percentage value (0 <= percent < 100) */
   percent: number;
 }
 
@@ -55,7 +55,7 @@ export function calculateSubtotalPaise(
 
 /**
  * Validates a discount percentage.
- * Rejects negative numbers and numbers above 100.
+ * Rejects negative numbers and discounts >= 100% (complimentary orders are not enabled).
  */
 export function validateDiscountPercent(percent: number): {
   isValid: boolean;
@@ -69,13 +69,27 @@ export function validateDiscountPercent(percent: number): {
     return { isValid: false, sanitizedPercent: 0, error: 'Discount cannot be negative' };
   }
   if (percent > 100) {
-    return { isValid: false, sanitizedPercent: 100, error: 'Discount cannot exceed 100%' };
+    return {
+      isValid: false,
+      sanitizedPercent: 0,
+      error: 'Discount cannot exceed 100% and must be less than 100%.',
+    };
   }
-  return { isValid: true, sanitizedPercent: Math.round(percent * 100) / 100 };
+  const rounded = Math.round(percent * 100) / 100;
+  if (rounded >= 100) {
+    return {
+      isValid: false,
+      sanitizedPercent: 0,
+      error:
+        '100% discounts (complimentary orders) are not currently enabled. Discount must be less than 100%.',
+    };
+  }
+  return { isValid: true, sanitizedPercent: rounded };
 }
 
 /**
- * Calculates discount amount in paise.
+ * Calculates discount amount in paise using scaled integer math so half-up
+ * rounding matches PostgreSQL NUMERIC arithmetic without IEEE-754 float drift.
  */
 export function calculateDiscountPaise(
   subtotalPaise: number,
@@ -83,12 +97,14 @@ export function calculateDiscountPaise(
 ): number {
   if (!Number.isFinite(subtotalPaise) || subtotalPaise <= 0) return 0;
   const validation = validateDiscountPercent(discount.percent);
-  if (!validation.isValid && discount.percent < 0) return 0;
+  if (!validation.isValid) return 0;
 
   const validPercent = validation.sanitizedPercent;
   if (validPercent <= 0) return 0;
 
-  return Math.round((subtotalPaise * validPercent) / 100);
+  const safeSubtotal = Math.floor(subtotalPaise);
+  const percentBasisPoints = Math.round(validPercent * 100);
+  return Math.min(safeSubtotal, Math.floor((safeSubtotal * percentBasisPoints + 5000) / 10000));
 }
 
 /**
@@ -102,9 +118,11 @@ export function calculateTaxPreviewPaise(
   if (!Number.isFinite(discountedSubtotalPaise) || discountedSubtotalPaise <= 0) {
     return 0;
   }
-  if (taxConfig.ratePercent <= 0) return 0;
+  if (!Number.isFinite(taxConfig.ratePercent) || taxConfig.ratePercent <= 0) return 0;
 
-  return Math.round((discountedSubtotalPaise * taxConfig.ratePercent) / 100);
+  const safeSubtotal = Math.floor(discountedSubtotalPaise);
+  const rateBasisPoints = Math.round(taxConfig.ratePercent * 100);
+  return Math.floor((safeSubtotal * rateBasisPoints + 5000) / 10000);
 }
 
 /**
@@ -131,7 +149,7 @@ export function calculateTaxSplitPaise(taxPaise: number): {
   sgstPaise: number;
 } {
   const safeTax = Math.max(0, Math.round(taxPaise));
-  const cgstPaise = Math.round(safeTax / 2);
+  const cgstPaise = Math.floor((safeTax + 1) / 2);
   const sgstPaise = safeTax - cgstPaise;
   return { cgstPaise, sgstPaise };
 }

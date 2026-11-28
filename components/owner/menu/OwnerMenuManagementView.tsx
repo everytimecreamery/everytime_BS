@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@/utils/supabase/client';
 import {
   fetchAllOwnerMenuData,
-  toggleMenuItemAvailability,
   APPROVED_LUCIDE_ICONS,
   ApprovedLucideIcon,
 } from '@/lib/supabase/menu';
+import { toggleMenuItemAvailabilityAction } from '@/app/actions/menu';
 import { formatPaise } from '@/lib/pos/calculations';
 import {
   Flame,
@@ -63,6 +63,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 type StatusFilter = 'all' | 'available' | 'unavailable' | 'archived';
 
 export function OwnerMenuManagementView() {
+  const supabase = useMemo(() => createClient(), []);
   const [activeTab, setActiveTab] = useState<'items' | 'categories'>('items');
   const [categories, setCategories] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
@@ -144,7 +145,7 @@ export function OwnerMenuManagementView() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadMenuData]);
+  }, [loadMenuData, supabase]);
 
   // Optimistic Toggle Availability
   const handleToggleAvailability = async (item: any) => {
@@ -154,7 +155,7 @@ export function OwnerMenuManagementView() {
       prev.map((i) => (i.id === item.id ? { ...i, is_available: !previousState } : i))
     );
 
-    const res = await toggleMenuItemAvailability(item.id, previousState);
+    const res = await toggleMenuItemAvailabilityAction(item.id, previousState);
     if (!res.success) {
       // Revert if failed
       setItems((prev) =>

@@ -1,127 +1,122 @@
 /**
  * Everytime Creamery — Direct Supabase Order Service
  *
- * Replaces offline outbox queue with immediate cloud persistence.
- * Pushes orders, items, and payments directly into Supabase so the
- * owner application and staff history see live data immediately.
+ * Persists completed POS orders through the authenticated server action
+ * (`submitOrderAction` -> PostgreSQL `complete_pos_checkout` RPC) so cashier
+ * identity, catalog pricing, GST calculation, and payment validation are
+ * enforced atomically on the server.
  */
 
 import { supabase } from '@/lib/supabase/client';
-import { PosOrder, PaymentMethod } from '@/lib/pos/order';
-import { generateUUID } from '@/lib/utils';
+import {
+  submitOrderAction,
+  correctPaymentMethodAction,
+  updateOrderAction,
+  type SplitPaymentTenderInput,
+} from '@/app/actions/orders';
+import { PosOrder, PaymentMethod, OrderSyncErrorKind } from '@/lib/pos/order';
 
 export interface PushOrderResult {
   success: boolean;
   orderId?: string;
+  data?: any;
   error?: string;
 }
 
+export function classifySyncError(errorMessage?: string): OrderSyncErrorKind {
+  const msg = (errorMessage || '').toLowerCase();
+  if (
+    msg.includes('billing session inactive') ||
+    msg.includes('billing is currently stopped')
+  ) {
+    return 'validation';
+  }
+  if (
+    msg.includes('authentication required') ||
+    msg.includes('unauthorized') ||
+    msg.includes('session') ||
+    msg.includes('jwt') ||
+    msg.includes('not signed in')
+  ) {
+    return 'auth_expired';
+  }
+  if (
+    msg.includes('failed to fetch') ||
+    msg.includes('network') ||
+    msg.includes('offline') ||
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('connection')
+  ) {
+    return 'network';
+  }
+  if (
+    msg.includes('validation') ||
+    msg.includes('price manipulation') ||
+    msg.includes('total manipulation') ||
+    msg.includes('archived') ||
+    msg.includes('unavailable') ||
+    msg.includes('does not exist') ||
+    msg.includes('payment validation')
+  ) {
+    return 'validation';
+  }
+  return 'unknown';
+}
+
 /**
- * Directly pushes a completed POS order to Supabase database.
- * Inserts order record, line items, and payment tender.
+ * Pushes a completed POS order through the authenticated server-side checkout
+ * pipeline (`submitOrderAction` -> `complete_pos_checkout` RPC).
  */
 export async function pushOrderToDatabase(
   order: PosOrder,
   method: PaymentMethod,
   tenderedPaise?: number,
-  changePaise?: number
+  changePaise?: number,
+  payments?: SplitPaymentTenderInput[],
+  options?: {
+    terminalId?: string | null;
+    staffMemberId?: string | null;
+  }
 ): Promise<PushOrderResult> {
   try {
-    const seqParts = order.token.split('-');
-    const seqNum = parseInt(
-      seqParts.length > 1 ? seqParts[1] : order.token.replace(/\D/g, '') || '1',
-      10
-    );
-    const taxPaise = order.taxPreviewPaise;
-    const cgstPaise = order.cgstPaise ?? Math.round(taxPaise / 2);
-    const sgstPaise = order.sgstPaise ?? (taxPaise - cgstPaise);
-    const completedAt = order.completedAt || new Date().toISOString();
-    const businessDate = order.businessDate || new Date().toISOString().split('T')[0];
+    const result = await submitOrderAction({
+      order,
+      method,
+      tenderedPaise,
+      changePaise,
+      payments,
+      ...(options?.terminalId !== undefined ? { terminalId: options.terminalId } : {}),
+      ...(options?.staffMemberId !== undefined ? { staffMemberId: options.staffMemberId } : {}),
+    });
 
-    // 1. Insert order record into public.orders
-    const { error: orderError } = await supabase.from('orders').upsert(
-      {
-        id: order.id,
-        store_id: '00000000-0000-0000-0000-000000000001',
-        terminal_id: '00000000-0000-0000-0000-000000000002',
-        cashier_id: null,
-        token_terminal: 'T1',
-        token_seq: seqNum,
-        status: 'COMPLETED',
-        subtotal_paise: order.subtotalPaise,
-        discount_paise: order.discountPaise,
-        discount_type: order.discount?.percent ? 'PERCENTAGE' : null,
-        discount_reason: null,
-        discount_approved_by: null,
-        tax_paise: taxPaise,
-        cgst_paise: cgstPaise,
-        sgst_paise: sgstPaise,
-        total_paise: order.totalPaise,
-        client_completed_at: completedAt,
-        business_date: businessDate,
-      },
-      { onConflict: 'id', ignoreDuplicates: true }
-    );
-
-    if (orderError) {
-      console.error('[pushOrderToDatabase] Order error:', orderError);
-      return { success: false, error: orderError.message };
+    if (!result.success) {
+      console.error('[pushOrderToDatabase] Server checkout error:', result.error);
+      return { success: false, error: result.error };
     }
 
-    // 2. Insert line items into public.order_items
-    if (order.items && order.items.length > 0) {
-      const itemsPayload = order.items.map((it) => ({
-        id: generateUUID(),
-        order_id: order.id,
-        menu_item_id: it.productId || null,
-        product_name: it.productName,
-        variant_label: it.variantLabel || null,
-        addon_label: it.addOnLabel || null,
-        quantity: it.quantity,
-        unit_price_paise: it.unitPricePaise,
-        addon_price_paise: 0,
-        total_price_paise: it.lineTotalPaise,
-      }));
-
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .upsert(itemsPayload, { onConflict: 'id', ignoreDuplicates: true });
-
-      if (itemsError) {
-        console.error('[pushOrderToDatabase] Items error:', itemsError);
-      }
-    }
-
-    // 3. Insert payment tender into public.payments
-    const paymentPayload = {
-      id: generateUUID(),
-      order_id: order.id,
-      method: method.toLowerCase() as 'cash' | 'upi' | 'card',
-      amount_paise: order.totalPaise,
-      upi_utr: null,
-      created_at: completedAt,
+    return {
+      success: true,
+      orderId: result.data?.order_id || result.data?.orderId || order.id,
+      data: result.data,
     };
-
-    const { error: paymentError } = await supabase
-      .from('payments')
-      .upsert(paymentPayload, { onConflict: 'id', ignoreDuplicates: true });
-
-    if (paymentError) {
-      console.error('[pushOrderToDatabase] Payment error:', paymentError);
-    }
-
-    return { success: true, orderId: order.id };
   } catch (err: any) {
     console.error('[pushOrderToDatabase] Unexpected exception:', err);
-    return { success: false, error: err?.message || 'Failed to push order to database' };
+    return {
+      success: false,
+      error: err?.message || 'Failed to push order to database',
+    };
   }
 }
 
 /**
- * Fetches all completed orders directly from Supabase,
- * joined with order items and payment records.
+ * Fetches all completed orders directly from Supabase along with status metadata.
  */
-export async function fetchOrdersFromDatabase(): Promise<PosOrder[]> {
+export async function fetchOrdersFromDatabaseWithStatus(): Promise<{
+  orders: PosOrder[];
+  error?: string;
+  authExpired?: boolean;
+}> {
   try {
     const { data, error } = await supabase
       .from('orders')
@@ -135,17 +130,30 @@ export async function fetchOrdersFromDatabase(): Promise<PosOrder[]> {
       .eq('status', 'COMPLETED')
       .order('client_completed_at', { ascending: false });
 
-    if (error || !data) {
+    if (error) {
       console.warn('[fetchOrdersFromDatabase] Query error:', error);
-      return [];
+      const kind = classifySyncError(error.message);
+      return {
+        orders: [],
+        error: error.message,
+        authExpired: kind === 'auth_expired',
+      };
     }
 
-    return data.map((rec: any) => ({
+    if (!data) {
+      return { orders: [] };
+    }
+
+    const orders: PosOrder[] = data.map((rec: any) => ({
       id: rec.id,
       token: rec.token_terminal
         ? `${rec.token_terminal}-${rec.token_seq.toString().padStart(3, '0')}`
         : `#${rec.token_seq.toString().padStart(3, '0')}`,
       status: 'COMPLETED',
+      syncStatus: 'SYNCED',
+      syncError: null,
+      syncRequiresAuth: false,
+      syncedAt: rec.server_received_at || rec.client_completed_at,
       items: (rec.order_items || []).map((it: any) => ({
         lineId: it.id,
         productId: it.menu_item_id || it.id,
@@ -154,7 +162,7 @@ export async function fetchOrdersFromDatabase(): Promise<PosOrder[]> {
         variantLabel: it.variant_label || undefined,
         addOnId: it.addon_label || undefined,
         addOnLabel: it.addon_label || undefined,
-        unitPricePaise: it.unit_price_paise,
+        unitPricePaise: (it.unit_price_paise || 0) + (it.addon_price_paise || 0),
         quantity: it.quantity,
         lineTotalPaise: it.total_price_paise,
         totalPricePaise: it.total_price_paise,
@@ -182,86 +190,90 @@ export async function fetchOrdersFromDatabase(): Promise<PosOrder[]> {
       completedAt: rec.client_completed_at,
       businessDate: rec.business_date,
     }));
-  } catch (err) {
+
+    return { orders };
+  } catch (err: any) {
     console.warn('[fetchOrdersFromDatabase] Exception:', err);
+    return {
+      orders: [],
+      error: err?.message || 'Failed to fetch orders from database',
+      authExpired: classifySyncError(err?.message) === 'auth_expired',
+    };
+  }
+}
+
+/**
+ * Fetches all completed orders directly from Supabase,
+ * joined with order items and payment records.
+ */
+export async function fetchOrdersFromDatabase(): Promise<PosOrder[]> {
+  const res = await fetchOrdersFromDatabaseWithStatus();
+  return res.orders;
+}
+
+export interface PaymentCorrectionEvent {
+  id: string;
+  payment_id: string;
+  order_id: string;
+  previous_method: 'cash' | 'upi' | 'card';
+  new_method: 'cash' | 'upi' | 'card';
+  amount_paise: number;
+  reason: string;
+  corrected_by: string;
+  created_at: string;
+}
+
+/**
+ * Controlled Owner-only payment method correction via database RPC.
+ * Amount, order association, and creation timestamp remain strictly immutable;
+ * records an append-only event in public.payment_corrections.
+ */
+export async function correctPaymentMethodInDatabase(
+  paymentId: string,
+  newMethod: 'cash' | 'upi' | 'card',
+  reason: string
+): Promise<{ success: boolean; data?: PaymentCorrectionEvent; error?: string }> {
+  return correctPaymentMethodAction({
+    paymentId,
+    newMethod,
+    reason,
+  });
+}
+
+/**
+ * Fetches the append-only payment method correction history for an order (Owner only).
+ */
+export async function fetchPaymentCorrectionsForOrder(
+  orderId: string
+): Promise<PaymentCorrectionEvent[]> {
+  try {
+    const { data, error } = await (supabase as any)
+      .from('payment_corrections')
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      return [];
+    }
+
+    return data as PaymentCorrectionEvent[];
+  } catch {
     return [];
   }
 }
 
 /**
- * Updates an existing order in Supabase (Owner action).
- * Supports editing status, discount, notes, and payment tender.
+ * Cancels or voids an unpaid pre-completion draft order with a mandatory reason.
+ * Completed orders and orders with recorded payments are rejected by the database.
  */
-export async function updateOrderInDatabase(
+export async function cancelUnpaidOrderInDatabase(
   orderId: string,
-  updates: {
-    status?: 'COMPLETED' | 'VOID' | 'REFUNDED' | 'CANCELLED' | 'MODIFIED';
-    discount_paise?: number;
-    discount_reason?: string | null;
-    subtotal_paise?: number;
-    tax_paise?: number;
-    total_paise?: number;
-    payment_method?: 'cash' | 'upi' | 'card';
-  }
+  status: 'CANCELLED' | 'VOID',
+  reason: string
 ): Promise<{ success: boolean; error?: string }> {
-  try {
-    const orderFields: Record<string, any> = {};
-    if (updates.status !== undefined) orderFields.status = updates.status;
-    if (updates.discount_paise !== undefined) orderFields.discount_paise = updates.discount_paise;
-    if (updates.discount_reason !== undefined) orderFields.discount_reason = updates.discount_reason;
-    if (updates.subtotal_paise !== undefined) orderFields.subtotal_paise = updates.subtotal_paise;
-    if (updates.tax_paise !== undefined) {
-      orderFields.tax_paise = updates.tax_paise;
-      orderFields.cgst_paise = Math.round(updates.tax_paise / 2);
-      orderFields.sgst_paise = updates.tax_paise - orderFields.cgst_paise;
-    }
-    if (updates.total_paise !== undefined) orderFields.total_paise = updates.total_paise;
-
-    if (Object.keys(orderFields).length > 0) {
-      const { error: ordErr } = await (supabase as any)
-        .from('orders')
-        .update(orderFields)
-        .eq('id', orderId);
-
-      if (ordErr) {
-        console.error('[updateOrderInDatabase] Error updating order:', ordErr);
-        return { success: false, error: ordErr.message };
-      }
-    }
-
-    if (updates.payment_method) {
-      const { error: payErr } = await (supabase as any)
-        .from('payments')
-        .update({ method: updates.payment_method })
-        .eq('order_id', orderId);
-
-      if (payErr) {
-        console.warn('[updateOrderInDatabase] Payment update warning:', payErr);
-      }
-    }
-
-    return { success: true };
-  } catch (err: any) {
-    console.error('[updateOrderInDatabase] Exception:', err);
-    return { success: false, error: err?.message || 'Failed to update order' };
-  }
-}
-
-/**
- * Permanently deletes an order and cascaded records from Supabase (Owner action).
- */
-export async function deleteOrderFromDatabase(
-  orderId: string
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const { error } = await supabase.from('orders').delete().eq('id', orderId);
-    if (error) {
-      console.error('[deleteOrderFromDatabase] Error deleting order:', error);
-      return { success: false, error: error.message };
-    }
-    return { success: true };
-  } catch (err: any) {
-    console.error('[deleteOrderFromDatabase] Exception:', err);
-    return { success: false, error: err?.message || 'Failed to delete order' };
-  }
+  return updateOrderAction(orderId, {
+    status,
+    cancelled_reason: reason,
+  });
 }

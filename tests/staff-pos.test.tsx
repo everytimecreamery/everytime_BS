@@ -289,11 +289,11 @@ import { resetSessionTokenCounter } from '@/lib/pos/order';
           expect(screen.queryByRole('button', { name: /Order #001 COMPLETED/i })).not.toBeInTheDocument();
           expect(screen.queryByText('Completed')).not.toBeInTheDocument();
 
-          // Open Order History to view Order #001 receipt
+          // Open Order History to view Order #001 receipt (local unconfirmed since unauthenticated in JSDOM)
           fireEvent.click(screen.getByRole('button', { name: /Order History/i }));
           const historyDialog = screen.getByRole('dialog', { name: /Order History/i });
           fireEvent.click(within(historyDialog).getByRole('button', { name: /View receipt for order #001/i }));
-          expect(within(historyDialog).getByText(/ORDER CONFIRMED & PAID/i)).toBeInTheDocument();
+          expect(within(historyDialog).getByText(/NOT YET CONFIRMED IN DATABASE|SAVED LOCALLY/i)).toBeInTheDocument();
           expect(within(historyDialog).getByText(/Oreo Cookie Monster/i)).toBeInTheDocument();
         });
 

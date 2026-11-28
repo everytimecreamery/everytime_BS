@@ -23,14 +23,249 @@ import {
   ALL_MENU_ITEMS,
   WAFFLE_SCOOP_OPTIONS,
 } from '@/lib/mock/menu';
+import { POSCartItem, generatePOSCartLineId } from '@/lib/pos/cart';
+import { calculateLineTotalPaise } from '@/lib/pos/calculations';
 import { deriveInteractionType } from '@/lib/supabase/menu';
 
 export const CACHED_MENU_CATALOG_KEY = 'cached_menu_catalog_v1';
+
+export type CatalogSource = 'mock' | 'cache' | 'supabase';
 
 export interface StaffCatalogData {
   categories: MenuCategory[];
   items: MenuItem[];
   updatedAt: number;
+}
+
+export interface ReconciledItemIssue {
+  item: POSCartItem;
+  reason: string;
+}
+
+export interface CatalogReconciliationResult {
+  reconciledItems: POSCartItem[];
+  unresolvedItems: ReconciledItemIssue[];
+  changed: boolean;
+}
+
+/**
+ * Verified 1:1 alias map ONLY for exact legacy mock IDs that correspond to
+ * identical products in the seeded Supabase catalog. Unrelated flavors/items
+ * are intentionally excluded so they are never silently substituted.
+ */
+const LEGACY_MOCK_TO_DB_ALIAS_MAP: Record<
+  string,
+  {
+    dbItemId: string;
+    requireVariants?: string[];
+    variantMap?: Record<string, string>;
+  }
+> = {
+  'sundae-hot-chocolate-fudge': {
+    dbItemId: 'sundae-hot-choc-fudge',
+  },
+  'thickshake-cold-milo': {
+    dbItemId: 'extra-cold-milo',
+  },
+  'gelato-classic-vanilla': {
+    dbItemId: 'tub-classic-vanilla',
+    requireVariants: ['250ml', '500ml'],
+    variantMap: {
+      '250ml': 'tub-classic-vanilla-250',
+      '500ml': 'tub-classic-vanilla-500',
+    },
+  },
+  'gelato-hazel-nutella': {
+    dbItemId: 'tub-hazel-nutella',
+    requireVariants: ['250ml', '500ml'],
+    variantMap: {
+      '250ml': 'tub-hazel-nutella-250',
+      '500ml': 'tub-hazel-nutella-500',
+    },
+  },
+  'gelato-oreo-cream': {
+    dbItemId: 'tub-oreo-cream',
+    requireVariants: ['250ml', '500ml'],
+    variantMap: {
+      '250ml': 'tub-oreo-cream-250',
+      '500ml': 'tub-oreo-cream-500',
+    },
+  },
+};
+
+/**
+ * Reconciles offline/draft cart items against an authoritative DB menu catalog:
+ * - Resolves exact IDs or strictly verified 1:1 aliases.
+ * - Never silently substitutes unrelated items.
+ * - Never trusts offline prices: adopts authoritative DB item/variant/add-on prices.
+ * - Revalidates item availability, archive status, variants, and add-ons.
+ */
+export function reconcileCartItemsWithCatalog(
+  items: POSCartItem[],
+  authoritativeItems: MenuItem[]
+): CatalogReconciliationResult {
+  const reconciledItems: POSCartItem[] = [];
+  const unresolvedItems: ReconciledItemIssue[] = [];
+  let changed = false;
+
+  const byId = new Map<string, MenuItem>();
+  for (const m of authoritativeItems) {
+    byId.set(m.id, m);
+  }
+
+  for (const item of items) {
+    let dbItem = byId.get(item.productId);
+    let mappedVariantId = item.variantId;
+
+    if (!dbItem) {
+      const alias = LEGACY_MOCK_TO_DB_ALIAS_MAP[item.productId];
+      if (
+        alias &&
+        (!alias.requireVariants || (item.variantId && alias.requireVariants.includes(item.variantId)))
+      ) {
+        const target = byId.get(alias.dbItemId);
+        if (target) {
+          dbItem = target;
+          if (item.variantId && alias.variantMap?.[item.variantId]) {
+            mappedVariantId = alias.variantMap[item.variantId];
+          }
+        }
+      }
+    }
+
+    if (!dbItem) {
+      unresolvedItems.push({
+        item,
+        reason: `Menu item "${item.productName}" (${item.productId}) does not exist in the live catalog.`,
+      });
+      continue;
+    }
+
+    if (dbItem.isArchived) {
+      unresolvedItems.push({
+        item,
+        reason: `Menu item "${dbItem.name}" is archived and cannot be sold.`,
+      });
+      continue;
+    }
+
+    if (dbItem.isAvailable === false) {
+      unresolvedItems.push({
+        item,
+        reason: `Menu item "${dbItem.name}" is currently unavailable.`,
+      });
+      continue;
+    }
+
+    let unitPricePaise = dbItem.basePricePaise;
+    let resolvedVariantId: string | undefined;
+    let resolvedVariantLabel: string | undefined;
+
+    if (dbItem.categoryId === 'gelato') {
+      if (mappedVariantId && mappedVariantId !== '85ml' && mappedVariantId !== 'cup-85ml') {
+        unresolvedItems.push({
+          item,
+          reason: `Invalid variant "${mappedVariantId}" for single-scoop gelato "${dbItem.name}".`,
+        });
+        continue;
+      }
+      resolvedVariantId = mappedVariantId;
+      resolvedVariantLabel = mappedVariantId ? '85ml' : undefined;
+      unitPricePaise = dbItem.basePricePaise;
+    } else if (dbItem.variants && dbItem.variants.length > 0) {
+      const matchedVariant = dbItem.variants.find(
+        (v) =>
+          v.id === mappedVariantId ||
+          v.label === mappedVariantId ||
+          (item.variantLabel && v.label === item.variantLabel)
+      );
+      if (!matchedVariant) {
+        unresolvedItems.push({
+          item,
+          reason: `Selected variant "${item.variantLabel || item.variantId || 'default'}" is no longer available for "${dbItem.name}".`,
+        });
+        continue;
+      }
+      resolvedVariantId = matchedVariant.id;
+      resolvedVariantLabel = matchedVariant.label;
+      unitPricePaise = matchedVariant.pricePaise;
+    } else if (mappedVariantId) {
+      unresolvedItems.push({
+        item,
+        reason: `Variant "${mappedVariantId}" is not valid for "${dbItem.name}".`,
+      });
+      continue;
+    }
+
+    let addonPricePaise = 0;
+    let resolvedAddOnId = item.addOnId;
+    let resolvedAddOnLabel = item.addOnLabel;
+
+    if (item.addOnId && item.addOnId !== 'scoop-none') {
+      const allowedAddOns =
+        dbItem.addOns || (dbItem.categoryId === 'waffle' ? WAFFLE_SCOOP_OPTIONS : []);
+      const matchedAddon = allowedAddOns.find(
+        (a) => a.id === item.addOnId || (item.addOnLabel && a.label === item.addOnLabel)
+      );
+      if (!matchedAddon) {
+        unresolvedItems.push({
+          item,
+          reason: `Add-on "${item.addOnLabel || item.addOnId}" is not valid for "${dbItem.name}".`,
+        });
+        continue;
+      }
+      resolvedAddOnId = matchedAddon.id;
+      resolvedAddOnLabel = matchedAddon.pricePaise === 0 ? undefined : matchedAddon.label;
+      addonPricePaise = matchedAddon.pricePaise;
+    } else if (item.addOnId === 'scoop-none') {
+      resolvedAddOnId = 'scoop-none';
+      resolvedAddOnLabel = undefined;
+    }
+
+    const authoritativeUnitPaise = unitPricePaise + addonPricePaise;
+    const authoritativeLineId = generatePOSCartLineId(
+      dbItem.id,
+      resolvedVariantId,
+      resolvedAddOnId
+    );
+
+    if (
+      authoritativeLineId !== item.lineId ||
+      dbItem.id !== item.productId ||
+      dbItem.name !== item.productName ||
+      resolvedVariantId !== item.variantId ||
+      authoritativeUnitPaise !== item.unitPricePaise
+    ) {
+      changed = true;
+    }
+
+    const existingIdx = reconciledItems.findIndex((r) => r.lineId === authoritativeLineId);
+    if (existingIdx >= 0) {
+      const existing = reconciledItems[existingIdx];
+      const mergedQty = existing.quantity + item.quantity;
+      reconciledItems[existingIdx] = {
+        ...existing,
+        quantity: mergedQty,
+        lineTotalPaise: calculateLineTotalPaise(authoritativeUnitPaise, mergedQty),
+      };
+      changed = true;
+    } else {
+      reconciledItems.push({
+        lineId: authoritativeLineId,
+        productId: dbItem.id,
+        productName: dbItem.name,
+        variantId: resolvedVariantId,
+        variantLabel: resolvedVariantLabel,
+        addOnId: resolvedAddOnId,
+        addOnLabel: resolvedAddOnLabel,
+        unitPricePaise: authoritativeUnitPaise,
+        quantity: item.quantity,
+        lineTotalPaise: calculateLineTotalPaise(authoritativeUnitPaise, item.quantity),
+      });
+    }
+  }
+
+  return { reconciledItems, unresolvedItems, changed };
 }
 
 /**
@@ -199,6 +434,9 @@ export function useStaffMenuCatalog() {
     return cached?.items ? cached.items : ALL_MENU_ITEMS;
   });
 
+  const [catalogSource, setCatalogSource] = useState<CatalogSource>(() =>
+    loadCachedCatalog()?.items ? 'cache' : 'mock'
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
 
@@ -207,11 +445,12 @@ export function useStaffMenuCatalog() {
     setIsLoading(true);
     const result = await fetchCatalogFromSupabase();
     if (result) {
-      if (result.categories) {
+      if (result.categories && result.categories.length > 0) {
         setCategories(result.categories);
       }
-      if (result.items) {
+      if (result.items && result.items.length > 0) {
         setItems(result.items);
+        setCatalogSource('supabase');
       }
     }
     setIsLoading(false);
@@ -287,6 +526,7 @@ export function useStaffMenuCatalog() {
   return {
     categories,
     items,
+    catalogSource,
     getItemsByCategory,
     isLoading,
     isOnline,

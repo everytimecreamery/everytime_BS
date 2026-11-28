@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { setMenuItemArchived, setCategoryArchived } from '@/lib/supabase/menu';
+import { setMenuItemArchivedAction, setCategoryArchivedAction } from '@/app/actions/menu';
 import { Archive, RotateCcw, AlertTriangle, X } from 'lucide-react';
 
 interface MenuArchiveDialogProps {
@@ -36,8 +36,8 @@ export function MenuArchiveDialog({
 
     try {
       const res = isItem
-        ? await setMenuItemArchived(target.id, isArchive)
-        : await setCategoryArchived(target.id, isArchive);
+        ? await setMenuItemArchivedAction(target.id, isArchive)
+        : await setCategoryArchivedAction(target.id, isArchive);
 
       if (!res.success) {
         setErrorMessage(res.error || 'Operation failed.');

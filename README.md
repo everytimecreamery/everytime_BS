@@ -34,3 +34,9 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Database Migrations & Rollbacks
+
+- **Forward migrations** (`00`–`08`) live exclusively in `supabase/migrations/` and follow Supabase CLI's `<version>_<name>.sql` convention.
+- **Manual rollback scripts** live separately in [`supabase/rollbacks/`](supabase/rollbacks/README.md) so the Supabase migration runner never discovers them as forward migrations or reports duplicate version prefixes.
+- Never execute rollback scripts automatically or move them into `supabase/migrations/`. Follow the manual procedure and `supabase migration repair --status reverted <version>` steps documented in [`supabase/rollbacks/README.md`](supabase/rollbacks/README.md).

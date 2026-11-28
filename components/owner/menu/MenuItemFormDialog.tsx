@@ -4,9 +4,9 @@ import React, { useState, useEffect } from 'react';
 import {
   MenuItemPayload,
   MenuVariantPayload,
-  saveMenuItem,
   deriveInteractionType,
 } from '@/lib/supabase/menu';
+import { saveMenuItemAction } from '@/app/actions/menu';
 import { paiseToRupees, rupeesToPaise, formatPaise } from '@/lib/pos/calculations';
 import { X, Plus, Trash2, Info, Sparkles, Star, Layers, IceCream } from 'lucide-react';
 
@@ -122,7 +122,7 @@ export function MenuItemFormDialog({
       variants: isGelatoCategory ? [] : variants,
     };
 
-    const res = await saveMenuItem(payload);
+    const res = await saveMenuItemAction(payload);
     if (!res.success) {
       setErrorMessage(res.error || 'Failed to save menu item');
       setIsSubmitting(false);

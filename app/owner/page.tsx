@@ -1,7 +1,5 @@
 import React, { Suspense } from 'react';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { createClient } from '@/utils/supabase/server';
+import { requireOwner } from '@/lib/auth/rbac';
 import { OwnerPortalClient } from '@/components/owner/OwnerPortalClient';
 
 export const metadata = {
@@ -10,26 +8,10 @@ export const metadata = {
 };
 
 async function OwnerPortalContent() {
-  const cookieStore = await cookies();
-  const supabase = createClient(cookieStore);
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect('/owner/login');
-  }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, role, full_name, store_id')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (!profile || profile.role !== 'owner') {
-    redirect('/owner/login?error=unauthorized');
-  }
+  const { user, profile } = await requireOwner({
+    redirectUrl: '/owner/login',
+    unauthorizedRedirectUrl: '/owner/login?error=unauthorized',
+  });
 
   return (
     <OwnerPortalClient

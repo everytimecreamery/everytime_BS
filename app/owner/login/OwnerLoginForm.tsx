@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BrandLogo } from '@/components/shared/BrandLogo';
 import { StatusBadge } from '@/components/shared/StatusBadge';
-import { loginOwnerAction, AuthActionResult } from './actions';
+import { loginOwnerAction, loginStaffAction, AuthActionResult } from './actions';
 import {
   ShieldCheck,
   Mail,
@@ -23,6 +23,11 @@ export function OwnerLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlError = searchParams.get('error');
+  const rawRedirect = searchParams.get('redirect');
+  const staffRedirectTarget =
+    rawRedirect === '/staff' || (rawRedirect?.startsWith('/staff/') ?? false)
+      ? rawRedirect
+      : null;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,6 +40,8 @@ export function OwnerLoginForm() {
   useEffect(() => {
     if (urlError === 'unauthorized') {
       setFormError('Access restricted: Owner credentials required to access this portal.');
+    } else if (urlError === 'deactivated') {
+      setFormError('This account has been deactivated by the store owner.');
     } else if (urlError === 'session_expired') {
       setFormError('Your session has expired. Please log in again to continue.');
     }
@@ -62,11 +69,12 @@ export function OwnerLoginForm() {
 
     startTransition(async () => {
       try {
-        const result: AuthActionResult = await loginOwnerAction(null, formData);
+        const result: AuthActionResult = staffRedirectTarget
+          ? await loginStaffAction(null, formData)
+          : await loginOwnerAction(null, formData);
         if (result.success) {
           setSuccess(true);
-          // Redirect to owner management desk
-          router.push('/owner');
+          router.push(staffRedirectTarget || '/owner');
           router.refresh();
         } else {
           setFormError(result.error || 'Authentication failed. Please check your credentials.');

@@ -23,6 +23,7 @@ import {
   calculateTaxPreviewPaise,
   calculateFinalPayablePaise,
   calculateTaxSplitPaise,
+  validateDiscountPercent,
 } from './calculations';
 import { formatOrderToken, formatTerminalToken, generateUUID } from '@/lib/utils';
 
@@ -33,6 +34,10 @@ export const COMPLETED_ORDER_RETENTION_MS = 60_000; // 1 minute auto-refresh win
 export type PaymentMethod = 'CASH' | 'UPI' | 'CARD';
 
 export type PaymentStatus = 'UNPAID' | 'PAID';
+
+export type OrderSyncStatus = 'LOCAL_ONLY' | 'PENDING_SYNC' | 'SYNCED' | 'SYNC_FAILED';
+
+export type OrderSyncErrorKind = 'network' | 'auth_expired' | 'validation' | 'unknown';
 
 export interface OrderModification {
   id: string;
@@ -84,6 +89,14 @@ export interface PosOrder {
   completedAt: string | null;
   businessDate?: string;
 
+  // Cloud Synchronization Tracking
+  syncStatus?: OrderSyncStatus;
+  syncError?: string | null;
+  syncErrorKind?: OrderSyncErrorKind;
+  syncRequiresAuth?: boolean;
+  syncedAt?: string | null;
+  lastSyncAttemptAt?: string | null;
+
   // Feature Enhancement: Edit Previous Orders & Audit Trail
   originalPayment?: OriginalPaymentInfo;
   modifications?: OrderModification[];
@@ -120,6 +133,26 @@ let sessionTokenCounter = 1;
  */
 export function resetSessionTokenCounter(startAt: number = 1): void {
   sessionTokenCounter = startAt;
+}
+
+/**
+ * Advances the in-memory session token counter past any existing local orders
+ * so browser reloads never collide on local token numbers.
+ */
+export function syncSessionTokenCounterFromOrders(orders: PosOrder[]): void {
+  let maxSeq = 0;
+  for (const order of orders) {
+    const match = (order.token || '').match(/(\d+)$/);
+    if (match) {
+      const seq = parseInt(match[1], 10);
+      if (Number.isFinite(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+  if (maxSeq >= sessionTokenCounter) {
+    sessionTokenCounter = maxSeq + 1;
+  }
 }
 
 /**
@@ -349,11 +382,20 @@ export function applyOrderDiscount(order: PosOrder, discount: DiscountConfig): P
     return order;
   }
 
-  const totals = recalculateOrderTotals(order.items, discount, order.taxConfig);
+  const validation = validateDiscountPercent(discount.percent);
+  if (!validation.isValid) {
+    throw new Error(validation.error || 'Discount must be between 0% and less than 100%.');
+  }
+
+  const sanitizedDiscount: DiscountConfig = {
+    ...discount,
+    percent: validation.sanitizedPercent,
+  };
+  const totals = recalculateOrderTotals(order.items, sanitizedDiscount, order.taxConfig);
 
   return {
     ...order,
-    discount,
+    discount: sanitizedDiscount,
     ...totals,
     updatedAt: new Date().toISOString(),
   };
@@ -404,6 +446,11 @@ export function completeOrderPayment(
 ): PosOrder {
   if (order.items.length === 0) {
     throw new Error('Cannot complete payment for an empty order');
+  }
+  if ((order.discount?.percent ?? 0) >= 100 || order.totalPaise <= 0) {
+    throw new Error(
+      'Complimentary (₹0) and 100% discounted orders are not supported. Discount must be less than 100%.'
+    );
   }
   if (order.status === 'COMPLETED') {
     return order;

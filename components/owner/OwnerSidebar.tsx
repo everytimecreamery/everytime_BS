@@ -17,10 +17,12 @@ import {
   ExternalLink,
   LogOut,
   UserCheck,
+  Clock,
 } from 'lucide-react';
 
 const ICON_MAP = {
   LayoutDashboard,
+  Clock,
   Receipt,
   BarChart3,
   IceCream,

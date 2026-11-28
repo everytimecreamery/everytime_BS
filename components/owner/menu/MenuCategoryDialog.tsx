@@ -3,10 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   CategoryPayload,
-  saveCategory,
   APPROVED_LUCIDE_ICONS,
   ApprovedLucideIcon,
 } from '@/lib/supabase/menu';
+import { saveCategoryAction } from '@/app/actions/menu';
 import {
   X,
   Layers,
@@ -99,7 +99,7 @@ export function MenuCategoryDialog({
       sort_order: sortOrder,
     };
 
-    const res = await saveCategory(payload);
+    const res = await saveCategoryAction(payload);
     if (!res.success) {
       setErrorMessage(res.error || 'Failed to save category.');
       setIsSubmitting(false);

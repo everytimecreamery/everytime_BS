@@ -24,6 +24,8 @@ interface OrderReceiptViewProps {
   order: PosOrder;
   onBack?: () => void;
   onClose?: () => void;
+  onRetrySync?: () => Promise<void> | void;
+  isRetryingSync?: boolean;
 }
 
 function formatFullDateTime(isoString?: string | null): { dateStr: string; timeStr: string } {
@@ -46,7 +48,13 @@ function formatFullDateTime(isoString?: string | null): { dateStr: string; timeS
   }
 }
 
-export function OrderReceiptView({ order, onBack, onClose }: OrderReceiptViewProps) {
+export function OrderReceiptView({
+  order,
+  onBack,
+  onClose,
+  onRetrySync,
+  isRetryingSync,
+}: OrderReceiptViewProps) {
   const { dateStr, timeStr } = formatFullDateTime(order.completedAt || order.createdAt);
   const paymentDiff = calculatePaymentDifference(order);
   const hasBeenModified =
@@ -115,11 +123,38 @@ export function OrderReceiptView({ order, onBack, onClose }: OrderReceiptViewPro
           <p className="text-[11px] font-semibold text-[#777777] tracking-wider uppercase">
             Artisan Handcrafted Gelato & Desserts
           </p>
-          <div className="pt-2 flex items-center justify-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-black tracking-wide uppercase">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>ORDER CONFIRMED & PAID</span>
-            </span>
+          <div className="pt-2 flex flex-col items-center justify-center gap-2">
+            {order.syncStatus === 'SYNCED' ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-black tracking-wide uppercase">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>ORDER CONFIRMED & PAID</span>
+              </span>
+            ) : order.syncStatus === 'PENDING_SYNC' ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-xs font-black tracking-wide uppercase">
+                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                <span>SAVED LOCALLY — SYNCING TO DATABASE</span>
+              </span>
+            ) : (
+              <div className="flex flex-col items-center gap-1.5">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 text-red-800 border border-red-200 text-xs font-black tracking-wide uppercase">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-600" />
+                  <span>LOCAL RECEIPT — NOT YET CONFIRMED IN DATABASE</span>
+                </span>
+                {order.syncError && (
+                  <p className="text-[11px] text-red-700 font-medium">{order.syncError}</p>
+                )}
+                {onRetrySync && (
+                  <button
+                    type="button"
+                    disabled={isRetryingSync}
+                    onClick={() => void onRetrySync()}
+                    className="px-3 py-1 rounded-lg bg-[#C43C1E] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {isRetryingSync ? 'Syncing...' : 'Retry Sync'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

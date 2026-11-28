@@ -51,11 +51,16 @@ function PaymentPreviewModal({
   }, [onClose]);
 
   const totalPaise = order.totalPaise;
+  const hasInvalidDiscountOrZeroTotal =
+    totalPaise <= 0 || (order.discount?.percent ?? 0) >= 100;
   const tenderedRupees = parseFloat(tenderedInput) || 0;
   const tenderedPaise = rupeesToPaise(tenderedRupees);
   const changePaise = calculateCashChangePaise(tenderedPaise, totalPaise);
 
       const handleConfirm = () => {
+        if (hasInvalidDiscountOrZeroTotal) {
+          return;
+        }
         if (selectedMethod === 'CASH') {
           onConfirmPayment('CASH', tenderedPaise, changePaise);
         } else {
@@ -263,6 +268,18 @@ function PaymentPreviewModal({
                           </div>
                         )}
 
+                          {hasInvalidDiscountOrZeroTotal && (
+                            <div
+                              role="alert"
+                              className="mb-3.5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2"
+                            >
+                              <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                              <span>
+                                Complimentary (₹0) orders and 100% discounts are not currently supported. Please reduce the discount below 100% before completing payment.
+                              </span>
+                            </div>
+                          )}
+
                           {/* Action Buttons: Cancel or Explicit Payment Confirmation */}
                           <div className="flex items-center gap-2.5">
                             <button
@@ -274,8 +291,9 @@ function PaymentPreviewModal({
                             </button>
                             <button
                               type="button"
+                              disabled={hasInvalidDiscountOrZeroTotal}
                               onClick={handleConfirm}
-                              className="flex-2 h-11 rounded-xl bg-[#C43C1E] hover:bg-[#AB3419] text-white text-xs font-bold transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                              className="flex-2 h-11 rounded-xl bg-[#C43C1E] hover:bg-[#AB3419] text-white text-xs font-bold transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <CheckCircle2 className="w-4 h-4" />
                               <span>Confirm Payment Received</span>

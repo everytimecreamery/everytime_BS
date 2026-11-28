@@ -11,8 +11,10 @@ import {
   PosOrder,
   OrderModification,
   OriginalPaymentInfo,
+  OrderSyncErrorKind,
   recalculateOrderTotals,
 } from './order';
+import { formatTerminalToken } from '@/lib/utils';
 import {
   POSCartItem,
   AddItemToCartInput,
@@ -119,6 +121,132 @@ export function addOrderToHistory(order: PosOrder): PosOrder[] {
 
   saveOrderHistory(updated);
   return updated;
+}
+
+/**
+ * Updates a locally stored order to SYNCED once the server confirms commit,
+ * adopting authoritative server token and financial totals.
+ */
+export function markOrderSyncedInHistory(
+  orderId: string,
+  serverData?: {
+    token_terminal?: string;
+    token_seq?: number;
+    subtotal_paise?: number;
+    discount_paise?: number;
+    tax_paise?: number;
+    cgst_paise?: number;
+    sgst_paise?: number;
+    total_paise?: number;
+  }
+): PosOrder[] {
+  const current = loadOrderHistory();
+  const now = new Date().toISOString();
+  const updated = current.map((o) => {
+    if (o.id !== orderId) return o;
+    const serverToken =
+      serverData?.token_terminal && serverData?.token_seq
+        ? formatTerminalToken(serverData.token_terminal, serverData.token_seq)
+        : o.token;
+    const totalPaise =
+      typeof serverData?.total_paise === 'number' ? serverData.total_paise : o.totalPaise;
+    return {
+      ...o,
+      token: serverToken,
+      subtotalPaise:
+        typeof serverData?.subtotal_paise === 'number'
+          ? serverData.subtotal_paise
+          : o.subtotalPaise,
+      discountPaise:
+        typeof serverData?.discount_paise === 'number'
+          ? serverData.discount_paise
+          : o.discountPaise,
+      taxPreviewPaise:
+        typeof serverData?.tax_paise === 'number' ? serverData.tax_paise : o.taxPreviewPaise,
+      cgstPaise:
+        typeof serverData?.cgst_paise === 'number' ? serverData.cgst_paise : o.cgstPaise,
+      sgstPaise:
+        typeof serverData?.sgst_paise === 'number' ? serverData.sgst_paise : o.sgstPaise,
+      totalPaise,
+      totalPayablePaise: totalPaise,
+      syncStatus: 'SYNCED' as const,
+      syncError: null,
+      syncErrorKind: undefined,
+      syncRequiresAuth: false,
+      syncedAt: now,
+      lastSyncAttemptAt: now,
+    };
+  });
+  saveOrderHistory(updated);
+  return updated;
+}
+
+/**
+ * Records a cloud synchronization failure on a local order without downgrading
+ * any order already confirmed in the database.
+ */
+export function markOrderSyncFailedInHistory(
+  orderId: string,
+  error: string,
+  kind: OrderSyncErrorKind = 'unknown'
+): PosOrder[] {
+  const current = loadOrderHistory();
+  const now = new Date().toISOString();
+  const updated = current.map((o) => {
+    if (o.id !== orderId || o.syncStatus === 'SYNCED') return o;
+    return {
+      ...o,
+      syncStatus: 'SYNC_FAILED' as const,
+      syncError: error,
+      syncErrorKind: kind,
+      syncRequiresAuth: kind === 'auth_expired',
+      lastSyncAttemptAt: now,
+    };
+  });
+  saveOrderHistory(updated);
+  return updated;
+}
+
+/**
+ * Merges database-confirmed orders with locally stored orders so unconfirmed
+ * local orders (PENDING_SYNC / SYNC_FAILED / LOCAL_ONLY) remain visible for retry.
+ */
+export function mergeDatabaseAndLocalOrders(
+  dbOrders: PosOrder[],
+  localOrders: PosOrder[]
+): PosOrder[] {
+  const byId = new Map<string, PosOrder>();
+
+  for (const dbOrder of dbOrders) {
+    byId.set(dbOrder.id, {
+      ...dbOrder,
+      syncStatus: 'SYNCED',
+      syncError: null,
+      syncRequiresAuth: false,
+    });
+  }
+
+  for (const localOrder of localOrders) {
+    if (!byId.has(localOrder.id)) {
+      if (localOrder.syncStatus === 'SYNCED') {
+        // Keep synced local order only if DB list was empty/unavailable, otherwise rely on DB
+        if (dbOrders.length === 0) {
+          byId.set(localOrder.id, localOrder);
+        }
+      } else {
+        byId.set(localOrder.id, {
+          ...localOrder,
+          syncStatus: localOrder.syncStatus || 'LOCAL_ONLY',
+        });
+      }
+    }
+  }
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const timeA = new Date(a.completedAt || a.createdAt).getTime();
+    const timeB = new Date(b.completedAt || b.createdAt).getTime();
+    return timeB - timeA;
+  });
 }
 
 /**

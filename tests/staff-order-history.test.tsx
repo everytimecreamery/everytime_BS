@@ -95,8 +95,8 @@ describe('Staff POS Order History Feature Tests', () => {
     const orderRow = within(historyDialog).getByRole('button', { name: /View receipt for order #001/i });
     fireEvent.click(orderRow);
 
-    // Verify receipt view elements
-    expect(within(historyDialog).getByText(/ORDER CONFIRMED & PAID/i)).toBeInTheDocument();
+    // Verify receipt view elements (honestly indicates local unconfirmed status when unauthenticated)
+    expect(within(historyDialog).getByText(/NOT YET CONFIRMED IN DATABASE|SAVED LOCALLY/i)).toBeInTheDocument();
     expect(within(historyDialog).getByText('Classic Vanilla')).toBeInTheDocument();
     expect(within(historyDialog).getByText('85ml')).toBeInTheDocument();
     expect(within(historyDialog).getAllByText('₹169').length).toBeGreaterThanOrEqual(1);

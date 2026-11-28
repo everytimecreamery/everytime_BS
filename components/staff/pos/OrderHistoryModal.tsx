@@ -8,8 +8,9 @@ import {
   filterAndSortOrderHistory,
   calculateHistoryRevenuePaise,
   loadOrderHistory,
+  mergeDatabaseAndLocalOrders,
 } from '@/lib/pos/orderHistory';
-import { fetchOrdersFromDatabase } from '@/lib/supabase/orders';
+import { fetchOrdersFromDatabaseWithStatus } from '@/lib/supabase/orders';
 import { formatPaise } from '@/lib/pos/calculations';
 import { OrderReceiptView } from './OrderReceiptView';
 import {
@@ -34,6 +35,7 @@ interface OrderHistoryModalProps {
   orders?: PosOrder[]; // optional fallback
   onClose: () => void;
   onUpdateOrder?: (updatedOrder: PosOrder) => void;
+  onRetryOrderSync?: (orderId: string) => Promise<boolean>;
 }
 
 function formatOrderTime(isoString?: string | null): string {
@@ -64,7 +66,7 @@ function formatOrderDate(isoString?: string | null): string {
   }
 }
 
-export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
+export function OrderHistoryModal({ isOpen, onClose, onRetryOrderSync }: OrderHistoryModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState<DateFilterOption>('all');
   const [customStart, setCustomStart] = useState('');
@@ -73,26 +75,52 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
   const [selectedOrder, setSelectedOrder] = useState<PosOrder | null>(null);
   const [historyOrders, setHistoryOrders] = useState<PosOrder[]>(() => loadOrderHistory());
   const [isLoading, setIsLoading] = useState(false);
+  const [retryingOrderId, setRetryingOrderId] = useState<string | null>(null);
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [dbAuthExpired, setDbAuthExpired] = useState(false);
 
-  // Load completed orders: reads local history first, then syncs with Supabase database
+  // Load orders: merge confirmed Supabase orders with locally stored/unsynced orders
   const loadOrders = useCallback(async () => {
     const local = loadOrderHistory();
-    if (local && local.length > 0) {
-      setHistoryOrders(local);
-    }
+    setHistoryOrders(local);
 
     setIsLoading(true);
+    setDbError(null);
+    setDbAuthExpired(false);
     try {
-      const ordersData = await fetchOrdersFromDatabase();
-      if (ordersData && ordersData.length > 0) {
-        setHistoryOrders(ordersData);
+      const dbRes = await fetchOrdersFromDatabaseWithStatus();
+      const latestLocal = loadOrderHistory();
+      if (dbRes.error) {
+        setDbError(dbRes.error);
+        setDbAuthExpired(Boolean(dbRes.authExpired));
       }
-    } catch (err) {
+      const merged = mergeDatabaseAndLocalOrders(dbRes.orders || [], latestLocal);
+      setHistoryOrders(merged);
+      setSelectedOrder((prev) =>
+        prev ? merged.find((o) => o.id === prev.id) || prev : null
+      );
+    } catch (err: any) {
       console.warn('Failed to load orders from database:', err);
+      setDbError(err?.message || 'Unable to reach database');
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  const handleRetrySync = useCallback(
+    async (orderId: string, e?: React.MouseEvent) => {
+      if (e) e.stopPropagation();
+      if (!onRetryOrderSync) return;
+      setRetryingOrderId(orderId);
+      try {
+        await onRetryOrderSync(orderId);
+        await loadOrders();
+      } finally {
+        setRetryingOrderId(null);
+      }
+    },
+    [onRetryOrderSync, loadOrders]
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -163,6 +191,12 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
             order={selectedOrder}
             onBack={() => setSelectedOrder(null)}
             onClose={handleClose}
+            onRetrySync={
+              onRetryOrderSync && selectedOrder.syncStatus !== 'SYNCED'
+                ? () => handleRetrySync(selectedOrder.id)
+                : undefined
+            }
+            isRetryingSync={retryingOrderId === selectedOrder.id}
           />
         ) : (
           <>
@@ -226,10 +260,29 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
 
               <div className="bg-white p-2.5 rounded-xl border border-[#E8E3C3]/80">
                 <div className="text-[10.5px] font-bold text-[#777777] uppercase tracking-wider">Database Status</div>
-                <div className="text-xs font-bold text-emerald-700 flex items-center gap-1 mt-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Cloud Live</span>
-                </div>
+                {dbAuthExpired ? (
+                  <div className="text-xs font-bold text-red-700 flex items-center gap-1 mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-600" />
+                    <span>Auth Expired</span>
+                  </div>
+                ) : dbError ? (
+                  <div className="text-xs font-bold text-amber-700 flex items-center gap-1 mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Offline / Local</span>
+                  </div>
+                ) : historyOrders.some((o) => o.syncStatus && o.syncStatus !== 'SYNCED') ? (
+                  <div className="text-xs font-bold text-amber-700 flex items-center gap-1 mt-1">
+                    <Clock className="w-3.5 h-3.5 text-amber-600" />
+                    <span>
+                      {historyOrders.filter((o) => o.syncStatus && o.syncStatus !== 'SYNCED').length} Unsynced
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-xs font-bold text-emerald-700 flex items-center gap-1 mt-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Cloud Live</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -301,13 +354,21 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
                   </p>
                 </div>
               ) : (
-                filteredOrders.map((order) => (
-                  <button
+                filteredOrders.map((order) => {
+                  const isSynced = order.syncStatus === 'SYNCED';
+                  const isPending = order.syncStatus === 'PENDING_SYNC';
+                  const isFailed = order.syncStatus === 'SYNC_FAILED' || order.syncStatus === 'LOCAL_ONLY' || !order.syncStatus;
+
+                  return (
+                  <div
                     key={order.id}
+                    className="w-full rounded-xl border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8]/40 hover:border-[#C43C1E]/40 transition-all flex items-center justify-between gap-2 shadow-2xs group pr-2"
+                  >
+                  <button
                     type="button"
                     aria-label={`View receipt for order ${order.token}`}
                     onClick={() => setSelectedOrder(order)}
-                    className="w-full text-left p-3.5 rounded-xl border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8]/40 hover:border-[#C43C1E]/40 transition-all flex items-center justify-between gap-3 shadow-2xs group cursor-pointer"
+                    className="flex-1 text-left p-3.5 flex items-center justify-between gap-3 cursor-pointer"
                   >
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-[#FAF8E8] border border-[#E8E3C3] flex items-center justify-center text-[#C43C1E] font-black text-xs shrink-0">
@@ -327,14 +388,31 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
                         <div className="text-[11px] text-[#777777] truncate max-w-xs sm:max-w-md mt-0.5">
                           {order.items.map((it) => `${it.quantity}x ${it.productName}`).join(', ')}
                         </div>
+                        {order.syncError && !isSynced && (
+                          <div className="text-[10px] text-red-700 truncate max-w-xs sm:max-w-md mt-0.5">
+                            {order.syncError}
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span className="hidden sm:inline">Database</span>
-                      </span>
+                      {isSynced ? (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          <span className="hidden sm:inline">Database</span>
+                        </span>
+                      ) : isPending ? (
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          <span>Pending Sync</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3 text-red-600" />
+                          <span>{order.syncStatus === 'SYNC_FAILED' ? 'Sync Failed' : 'Local Only'}</span>
+                        </span>
+                      )}
 
                       <div className="text-right">
                         <div className="text-sm font-black text-[#222222] tabular-nums">
@@ -348,7 +426,19 @@ export function OrderHistoryModal({ isOpen, onClose }: OrderHistoryModalProps) {
                       <ChevronRight className="w-4 h-4 text-[#777777] group-hover:text-[#C43C1E] transition-colors" />
                     </div>
                   </button>
-                ))
+                  {isFailed && onRetryOrderSync && (
+                    <button
+                      type="button"
+                      disabled={retryingOrderId === order.id}
+                      onClick={(e) => void handleRetrySync(order.id, e)}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#C43C1E] text-white text-[10.5px] font-bold shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      {retryingOrderId === order.id ? 'Syncing...' : 'Retry Sync'}
+                    </button>
+                  )}
+                  </div>
+                  );
+                })
               )}
             </div>
           </>

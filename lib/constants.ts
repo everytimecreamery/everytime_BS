@@ -35,6 +35,13 @@ export const OWNER_NAV_ITEMS: OwnerNavItem[] = [
     description: 'Real-time sales velocity, order metrics, and daily overview.',
   },
   {
+    id: 'billing-sessions',
+    label: 'Billing Sessions',
+    iconName: 'Clock',
+    href: '/owner#billing-sessions',
+    description: 'Live terminal billing ON/OFF monitoring, session history, and order audits.',
+  },
+  {
     id: 'sales',
     label: 'Sales',
     iconName: 'Receipt',
@@ -60,7 +67,7 @@ export const OWNER_NAV_ITEMS: OwnerNavItem[] = [
     label: 'Staff Management',
     iconName: 'Users',
     href: '/owner#staff',
-    description: 'Counter staff accounts, PINs, and shift monitoring.',
+    description: 'Employee directory, store assignments, and cashier codes.',
   },
   {
     id: 'settings',

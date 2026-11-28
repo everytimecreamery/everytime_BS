@@ -76,15 +76,28 @@ describe('Staff POS Calculations Unit Tests (Phase 1)', () => {
       expect(calculateDiscountPaise(33800, discount)).toBe(0);
     });
 
-    it('rejects discount percentages exceeding 100% and falls back safely', () => {
-      const res = validateDiscountPercent(150);
-      expect(res.isValid).toBe(false);
-      expect(res.error).toContain('cannot exceed 100%');
+    it('rejects discount percentages at or exceeding 100% and falls back safely', () => {
+      const resOver = validateDiscountPercent(150);
+      expect(resOver.isValid).toBe(false);
+      expect(resOver.error).toContain('cannot exceed 100%');
+
+      const resExact100 = validateDiscountPercent(100);
+      expect(resExact100.isValid).toBe(false);
+      expect(resExact100.error).toMatch(/100% discounts|less than 100%/i);
+
+      const resRounded100 = validateDiscountPercent(99.996);
+      expect(resRounded100.isValid).toBe(false);
+      expect(resRounded100.error).toMatch(/less than 100%/i);
+
+      expect(calculateDiscountPaise(33800, { type: 'custom', percent: 100 })).toBe(0);
+      expect(calculateDiscountPaise(33800, { type: 'custom', percent: 150 })).toBe(0);
     });
 
-    it('validates 0% and 100% boundary discounts', () => {
+    it('validates 0% and sub-100% (99.99%) boundary discounts', () => {
       expect(validateDiscountPercent(0).isValid).toBe(true);
-      expect(validateDiscountPercent(100).isValid).toBe(true);
+      expect(validateDiscountPercent(99).isValid).toBe(true);
+      expect(validateDiscountPercent(99.99).isValid).toBe(true);
+      expect(validateDiscountPercent(100).isValid).toBe(false);
     });
   });
 
@@ -110,6 +123,13 @@ describe('Staff POS Calculations Unit Tests (Phase 1)', () => {
 
     it('prevents negative final payable if discount exceeds subtotal', () => {
       expect(calculateFinalPayablePaise(1000, 2000, 0)).toBe(0);
+    });
+
+    it('avoids IEEE-754 float drift so client discount/tax rounding matches Postgres NUMERIC', () => {
+      // 5000 * 1.13 / 100 = 56.5 -> Postgres round(numeric) = 57 (raw JS float gives 56.49999999999999 -> 56)
+      expect(calculateDiscountPaise(5000, { type: 'custom', percent: 1.13 })).toBe(57);
+      // 1990 * 5 / 100 = 99.5 -> 100
+      expect(calculateTaxPreviewPaise(1990, DEFAULT_TAX_CONFIG)).toBe(100);
     });
   });
 

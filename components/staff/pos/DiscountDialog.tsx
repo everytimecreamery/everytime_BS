@@ -48,7 +48,9 @@ function DiscountDialogModal({
       const num = parseFloat(customValue);
       const validation = validateDiscountPercent(num);
       if (!validation.isValid) {
-        setErrorMessage(validation.error || 'Please enter a valid percentage (0–100)');
+        setErrorMessage(
+          validation.error || 'Please enter a valid percentage (0 to less than 100)'
+        );
         return;
       }
       onApplyDiscount({ type: 'custom', percent: validation.sanitizedPercent });
@@ -90,8 +92,8 @@ function DiscountDialogModal({
               setErrorMessage(null);
             }}
             className={`h-11 rounded-xl text-xs font-bold border transition-all cursor-pointer ${selectedType === 'none'
-                ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
-                : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
+              ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
+              : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
               }`}
           >
             No Discount
@@ -104,8 +106,8 @@ function DiscountDialogModal({
               setErrorMessage(null);
             }}
             className={`h-11 rounded-xl text-xs font-bold border transition-all cursor-pointer ${selectedType === 'percent_5'
-                ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
-                : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
+              ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
+              : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
               }`}
           >
             5% Discount
@@ -118,8 +120,8 @@ function DiscountDialogModal({
               setErrorMessage(null);
             }}
             className={`h-11 rounded-xl text-xs font-bold border transition-all cursor-pointer ${selectedType === 'percent_10'
-                ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
-                : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
+              ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
+              : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
               }`}
           >
             10% Discount
@@ -132,8 +134,8 @@ function DiscountDialogModal({
               setErrorMessage(null);
             }}
             className={`h-11 rounded-xl text-xs font-bold border transition-all cursor-pointer ${selectedType === 'custom'
-                ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
-                : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
+              ? 'bg-[#C43C1E] text-white border-[#C43C1E] shadow-2xs'
+              : 'bg-white text-[#222222] border-[#E8E3C3] hover:bg-[#FAF8E8]'
               }`}
           >
             Custom %
@@ -144,14 +146,14 @@ function DiscountDialogModal({
         {selectedType === 'custom' && (
           <div className="mb-4 text-left">
             <label htmlFor="custom-discount-input" className="block text-xs font-bold text-[#222222] mb-1.5">
-              Enter Percentage (0 to 100):
+              Enter Percentage (0 to below 100):
             </label>
             <div className="relative">
               <input
                 id="custom-discount-input"
                 type="number"
                 min="0"
-                max="100"
+                max="99.99"
                 step="0.5"
                 value={customValue}
                 onChange={(e) => {

@@ -1,28 +1,38 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/utils/supabase/client';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/lib/supabase/database.types';
 
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://guvdawwjgxwvdqqedvfy.supabase.co';
-const supabaseAnonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1dmRhd3dqZ3h3dmRxcWVkdmZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUyNzc2MzcsImV4cCI6MjExMDg1MzYzN30.MIdnExuseNgiBLZK_Hb99DOKd8Rghf-SqumdH-nSczs';
+let browserClientSingleton: SupabaseClient<Database> | null = null;
 
-if (!supabaseUrl || !supabaseAnonKey) {
+/**
+ * Returns the standardized cookie-backed browser Supabase client (@supabase/ssr).
+ * Replaces the legacy localStorage-backed @supabase/supabase-js client so
+ * browser queries and Realtime subscriptions share the SSR cookie session.
+ */
+export function getSupabaseBrowserClient(): SupabaseClient<Database> {
   if (typeof window !== 'undefined') {
-    console.warn(
-      'Supabase client initialized with missing URL or Anon Key. Check .env.local'
-    );
+    if (!browserClientSingleton) {
+      browserClientSingleton = createClient();
+    }
+    return browserClientSingleton;
   }
+  return createClient();
 }
 
 /**
- * Public browser-safe Supabase client (Client Components & Outbox sync worker).
- * Uses public Anon Key and respects Row-Level Security (RLS).
+ * Public browser-safe Supabase client (Client Components & Realtime).
+ * Lazily resolves the @supabase/ssr cookie-backed browser client and
+ * strictly enforces Row-Level Security (RLS) using the public anon/publishable key.
  */
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
+export const supabase: SupabaseClient<Database> = new Proxy(
+  {} as SupabaseClient<Database>,
+  {
+    get(_target, prop) {
+      const client = getSupabaseBrowserClient();
+      const value = Reflect.get(client, prop, client);
+      return typeof value === 'function' ? value.bind(client) : value;
+    },
+  }
+);
+
+export { createClient };

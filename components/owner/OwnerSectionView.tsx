@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@/utils/supabase/client';
 import { formatPaise } from '@/lib/pos/calculations';
 import {
   TrendingUp,
@@ -22,10 +22,11 @@ import {
   Wifi,
   WifiOff,
   Pencil,
-  Trash2,
 } from 'lucide-react';
-import { OwnerOrderEditModal, OwnerOrderDeleteDialog } from './OwnerOrderActionModal';
+import { OwnerOrderEditModal } from './OwnerOrderActionModal';
 import { OwnerMenuManagementView } from './menu/OwnerMenuManagementView';
+import { StaffManagementView } from './StaffManagementView';
+import { BillingMonitoringView } from './BillingMonitoringView';
 
 interface OwnerSectionViewProps {
   sectionId: string;
@@ -33,6 +34,8 @@ interface OwnerSectionViewProps {
 
 export function OwnerSectionView({ sectionId }: OwnerSectionViewProps) {
   switch (sectionId) {
+    case 'billing-sessions':
+      return <BillingMonitoringView />;
     case 'sales':
       return <SalesView />;
     case 'reports':
@@ -65,39 +68,49 @@ function formatRelativeTime(dateString?: string | null): string {
 // 1. DASHBOARD VIEW (LIVE SUPABASE READS & REALTIME ORDERS)
 // -----------------------------------------------------------------------------
 function DashboardView() {
+  const supabase = useMemo(() => createClient(), []);
   const [orders, setOrders] = useState<any[]>([]);
   const [terminals, setTerminals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [editingOrder, setEditingOrder] = useState<any | null>(null);
-  const [deletingOrder, setDeletingOrder] = useState<any | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const today = new Date().toISOString().split('T')[0];
 
       // 1. Fetch completed orders for today
-      const { data: ordersData } = await supabase
+      const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('*, order_items(*), payments(*)')
         .eq('status', 'COMPLETED')
         .eq('business_date', today)
         .order('client_completed_at', { ascending: false });
 
-      if (ordersData) setOrders(ordersData);
+      if (ordersError) {
+        setFetchError(ordersError.message);
+      } else if (ordersData) {
+        setOrders(ordersData);
+      }
 
       // 2. Fetch terminals for staleness badge
-      const { data: termData } = await supabase
+      const { data: termData, error: termError } = await supabase
         .from('terminals')
         .select('*');
 
-      if (termData) setTerminals(termData);
-    } catch (err) {
-      console.warn('Dashboard fetch error:', err);
+      if (termError) {
+        setFetchError((prev) => prev || termError.message);
+      } else if (termData) {
+        setTerminals(termData);
+      }
+    } catch (err: any) {
+      setFetchError(err?.message || 'Failed to load dashboard data.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     fetchData();
@@ -131,7 +144,7 @@ function DashboardView() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchData]);
+  }, [fetchData, supabase]);
 
   // Aggregate metrics
   const grossRevenuePaise = useMemo(
@@ -143,6 +156,16 @@ function DashboardView() {
 
   return (
     <div className="space-y-6">
+      {fetchError && (
+        <div
+          role="alert"
+          className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center gap-2"
+        >
+          <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+          <span>Unable to load live dashboard records: {fetchError}</span>
+        </div>
+      )}
+
       {/* Staleness / Terminal Status Bar */}
       <div className="bg-white p-3 sm:px-4 sm:py-3 rounded-xl border border-[#E8E3C3] shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -275,9 +298,7 @@ function DashboardView() {
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                     order.status === 'COMPLETED'
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : order.status === 'REFUNDED'
-                      ? 'bg-purple-50 text-purple-700 border-purple-200'
-                      : 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-zinc-100 text-zinc-700 border-zinc-200'
                   }`}>
                     {order.status}
                   </span>
@@ -286,20 +307,11 @@ function DashboardView() {
                     <button
                       type="button"
                       onClick={() => setEditingOrder(order)}
-                      aria-label="Edit Order"
+                      aria-label="Inspect Order & Correct Tender"
                       className="p-1 rounded-md border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8] text-[#777777] hover:text-[#C43C1E] transition-colors cursor-pointer"
-                      title="Edit Order"
+                      title="Inspect Order & Correct Tender"
                     >
                       <Pencil className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeletingOrder(order)}
-                      aria-label="Delete Order"
-                      className="p-1 rounded-md border border-red-200 bg-white hover:bg-red-50 text-red-600 hover:text-red-700 transition-colors cursor-pointer"
-                      title="Delete Order"
-                    >
-                      <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
@@ -315,13 +327,6 @@ function DashboardView() {
         onClose={() => setEditingOrder(null)}
         onSaved={fetchData}
       />
-
-      <OwnerOrderDeleteDialog
-        isOpen={Boolean(deletingOrder)}
-        order={deletingOrder}
-        onClose={() => setDeletingOrder(null)}
-        onDeleted={fetchData}
-      />
     </div>
   );
 }
@@ -330,35 +335,45 @@ function DashboardView() {
 // 2. SALES VIEW (TRANSACTION LEDGER & TENDER SPLIT)
 // -----------------------------------------------------------------------------
 function SalesView() {
+  const supabase = useMemo(() => createClient(), []);
   const [orders, setOrders] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [editingOrder, setEditingOrder] = useState<any | null>(null);
-  const [deletingOrder, setDeletingOrder] = useState<any | null>(null);
 
   const loadSales = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
-      const { data: oData } = await supabase
+      const { data: oData, error: oErr } = await supabase
         .from('orders')
         .select('*, order_items(*), payments(*)')
         .order('client_completed_at', { ascending: false })
         .limit(100);
 
-      if (oData) setOrders(oData);
+      if (oErr) {
+        setFetchError(oErr.message);
+      } else if (oData) {
+        setOrders(oData);
+      }
 
-      const { data: pData } = await supabase
+      const { data: pData, error: pErr } = await supabase
         .from('payments')
         .select('*')
         .limit(200);
 
-      if (pData) setPayments(pData);
-    } catch (err) {
-      console.warn('Sales fetch error:', err);
+      if (pErr) {
+        setFetchError((prev) => prev || pErr.message);
+      } else if (pData) {
+        setPayments(pData);
+      }
+    } catch (err: any) {
+      setFetchError(err?.message || 'Failed to load sales ledger.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     loadSales();
@@ -391,7 +406,7 @@ function SalesView() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadSales]);
+  }, [loadSales, supabase]);
 
   // Split payment totals
   const cashTotal = payments.filter((p) => p.method === 'cash').reduce((sum, p) => sum + p.amount_paise, 0);
@@ -400,6 +415,16 @@ function SalesView() {
 
   return (
     <div className="space-y-6">
+      {fetchError && (
+        <div
+          role="alert"
+          className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center gap-2"
+        >
+          <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+          <span>Unable to load sales records: {fetchError}</span>
+        </div>
+      )}
+
       {/* Payment Tender Split Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white p-4 rounded-xl border border-[#E8E3C3] flex items-center justify-between">
@@ -470,8 +495,6 @@ function SalesView() {
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                         o.status === 'COMPLETED'
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : o.status === 'REFUNDED'
-                          ? 'bg-purple-50 text-purple-700 border-purple-200'
                           : o.status === 'VOID'
                           ? 'bg-zinc-100 text-zinc-700 border-zinc-200'
                           : 'bg-red-50 text-red-700 border-red-200'
@@ -484,20 +507,11 @@ function SalesView() {
                         <button
                           type="button"
                           onClick={() => setEditingOrder(o)}
-                          aria-label={`Edit Order ${o.token_seq}`}
+                          aria-label={`Inspect Order ${o.token_seq}`}
                           className="p-1.5 rounded-lg border border-[#E8E3C3] bg-white hover:bg-[#FAF8E8] text-[#777777] hover:text-[#C43C1E] transition-colors cursor-pointer"
-                          title="Edit Order"
+                          title="Inspect Order & Correct Tender"
                         >
                           <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingOrder(o)}
-                          aria-label={`Delete Order ${o.token_seq}`}
-                          className="p-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 text-red-600 hover:text-red-700 transition-colors cursor-pointer"
-                          title="Delete Order"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
@@ -515,13 +529,6 @@ function SalesView() {
         onClose={() => setEditingOrder(null)}
         onSaved={loadSales}
       />
-
-      <OwnerOrderDeleteDialog
-        isOpen={Boolean(deletingOrder)}
-        order={deletingOrder}
-        onClose={() => setDeletingOrder(null)}
-        onDeleted={loadSales}
-      />
     </div>
   );
 }
@@ -530,6 +537,7 @@ function SalesView() {
 // 3. REPORTS VIEW (Z-REPORT DAILY CLOSURE)
 // -----------------------------------------------------------------------------
 function ReportsView() {
+  const supabase = useMemo(() => createClient(), []);
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -550,7 +558,7 @@ function ReportsView() {
       }
     }
     loadZReports();
-  }, []);
+  }, [supabase]);
 
   return (
     <div className="bg-white rounded-xl border border-[#E8E3C3] p-8 text-center shadow-xs">
@@ -588,52 +596,7 @@ function ReportsView() {
 
 
 // -----------------------------------------------------------------------------
-// 5. STAFF MANAGEMENT VIEW
-// -----------------------------------------------------------------------------
-function StaffManagementView() {
-  const [profiles, setProfiles] = useState<any[]>([]);
-
-  useEffect(() => {
-    async function loadProfiles() {
-      try {
-        const { data } = await supabase.from('profiles').select('*');
-        if (data) setProfiles(data);
-      } catch (err) {
-        console.warn('Profiles load error:', err);
-      }
-    }
-    loadProfiles();
-  }, []);
-
-  return (
-    <div className="bg-white rounded-xl border border-[#E8E3C3] p-5 shadow-xs">
-      <h3 className="text-sm font-bold text-[#222222] mb-3">Staff Accounts & Counter Cashiers</h3>
-      <div className="space-y-2">
-        {profiles.length === 0 ? (
-          <div className="p-3 bg-[#FAF8E8] rounded-xl border border-[#E8E3C3] text-xs flex items-center justify-between">
-            <span className="font-bold text-[#222222]">Alex M. (Terminal #01 Cashier)</span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Staff Active</span>
-          </div>
-        ) : (
-          profiles.map((p) => (
-            <div key={p.id} className="p-3 bg-white rounded-xl border border-[#E8E3C3] text-xs flex items-center justify-between">
-              <div>
-                <span className="font-bold text-[#222222] block">{p.full_name}</span>
-                <span className="text-[11px] text-[#777777]">Code: {p.cashier_code || 'C01'}</span>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-[#FAF8E8] text-[#C43C1E] border border-[#E8E3C3]">
-                {p.role}
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-// -----------------------------------------------------------------------------
-// 6. SETTINGS VIEW
+// 5. SETTINGS VIEW
 // -----------------------------------------------------------------------------
 function SettingsView() {
   return (

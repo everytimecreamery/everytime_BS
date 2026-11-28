@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { calculateTaxSplitPaise } from '@/lib/pos/calculations';
 import { PosOrder } from '@/lib/pos/order';
 
+const mockSubmitOrderAction = vi.fn();
+vi.mock('@/app/actions/orders', () => ({
+  submitOrderAction: (...args: any[]) => mockSubmitOrderAction(...args),
+}));
+
+import { pushOrderToDatabase } from '@/lib/supabase/orders';
+
 describe('Supabase Order Direct Push & Tax Invariant Tests', () => {
   describe('1. Tax Split Invariant: CGST + SGST === tax_paise', () => {
     it('guarantees exact split on odd paise totals without losing or adding paise', () => {
@@ -98,6 +105,73 @@ describe('Supabase Order Direct Push & Tax Invariant Tests', () => {
       expect(dbOrderRecord.token_seq).toBe(1);
       expect(dbOrderRecord.total_paise).toBe(20790);
       expect(dbOrderRecord.cgst_paise + dbOrderRecord.sgst_paise).toBe(dbOrderRecord.tax_paise);
+    });
+  });
+
+  describe('3. Secure Server-Side Checkout Delegation (pushOrderToDatabase)', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('delegates checkout persistence to authenticated submitOrderAction instead of client-side table inserts', async () => {
+      const sampleOrder: PosOrder = {
+        id: '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
+        token: 'T1-001',
+        status: 'COMPLETED',
+        items: [
+          {
+            lineId: 'line-1',
+            productId: 'gelato-madagascar-vanilla',
+            productName: 'Madagascar Vanilla',
+            unitPricePaise: 9900,
+            quantity: 2,
+            lineTotalPaise: 19800,
+          },
+        ],
+        subtotalPaise: 19800,
+        discountPaise: 0,
+        taxPreviewPaise: 990,
+        cgstPaise: 495,
+        sgstPaise: 495,
+        totalPaise: 20790,
+        totalPayablePaise: 20790,
+        totalQuantity: 2,
+        discount: { type: 'none', percent: 0 },
+        taxConfig: { ratePercent: 5, isProvisional: false },
+        paymentStatus: 'PAID',
+        paymentMethod: 'CASH',
+        createdAt: '2026-11-22T01:30:00.000Z',
+        updatedAt: '2026-11-22T01:30:00.000Z',
+        completedAt: '2026-11-22T01:30:00.000Z',
+        businessDate: '2026-11-22',
+      };
+
+      mockSubmitOrderAction.mockResolvedValueOnce({
+        success: true,
+        data: { order_id: sampleOrder.id, cashier_id: 'staff-uuid-1' },
+      });
+
+      const res = await pushOrderToDatabase(sampleOrder, 'CASH', 25000, 4210);
+      expect(res.success).toBe(true);
+      expect(res.orderId).toBe(sampleOrder.id);
+      expect(mockSubmitOrderAction).toHaveBeenCalledWith({
+        order: sampleOrder,
+        method: 'CASH',
+        tenderedPaise: 25000,
+        changePaise: 4210,
+        payments: undefined,
+      });
+    });
+
+    it('returns error when server checkout rejects manipulated payload', async () => {
+      mockSubmitOrderAction.mockResolvedValueOnce({
+        success: false,
+        error: 'Price manipulation rejected',
+      });
+
+      const res = await pushOrderToDatabase({ id: 'bad-id', items: [] } as any, 'CASH');
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/Price manipulation rejected/i);
     });
   });
 });
